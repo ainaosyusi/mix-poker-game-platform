@@ -5,7 +5,11 @@ import cors from 'cors';
 import { evaluateHand, compareHands } from './handEvaluator.js';
 
 const app = express();
-app.use(cors());
+const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+app.use(cors({
+  origin: CLIENT_URL,
+  credentials: true
+}));
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -13,11 +17,12 @@ app.get('/', (req, res) => {
 });
 
 const httpServer = createServer(app);
-// Socket.ioの設定 (CORS許可: どこからでも接続OKにする)
+// Socket.ioの設定 (CORS許可)
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173", // クライアントのURL
-    methods: ["GET", "POST"]
+    origin: CLIENT_URL,
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
