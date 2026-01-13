@@ -5,6 +5,10 @@ import cors from 'cors';
 import { evaluateHand, compareHands } from './handEvaluator.js';
 const app = express();
 app.use(cors());
+// Health check endpoint
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', message: 'Mix Poker Game Server is running' });
+});
 const httpServer = createServer(app);
 // Socket.ioの設定 (CORS許可: どこからでも接続OKにする)
 const io = new Server(httpServer, {
@@ -297,7 +301,7 @@ io.on('connection', (socket) => {
         broadcastGameState();
     });
 });
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
     console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
 });

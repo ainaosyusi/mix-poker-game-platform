@@ -1,167 +1,146 @@
-# デプロイ準備メモ
+# GitHub & Render.com デプロイガイド
 
-## 完了した機能
+## ✅ GitHub リポジトリ作成完了
 
-### Level 1-2: 基本機能 ✅
-- Socket.io接続
-- カード表示（デッキ作成とシャッフル）
-- チップ管理（ベット、コール、フォールド）
-- ターン管理
-- ショーダウンと勝者判定
+**リポジトリURL**: https://github.com/ainaosyusi/mix-poker-game-platform
 
-### Level 3: ゲーム設定の動的変更 ✅
-- 設定オブジェクトによる管理
-- プリセット（5-Card Draw, Texas Hold'em, Omaha, 7-Card Stud）
-- 手札枚数の動的変更（2〜7枚）
+**プッシュ結果**:
+- ✅ 72ファイル
+- ✅ 3.04 MB
+- ✅ ブランチ: main
 
-### Level 4: ハウスルールとミックスゲーム ✅
-- カード交換機能（Drawゲームの基礎） ✅
-- 表向きカード（Studゲームの基礎、簡易版） ✅
-- リシャッフル規則（Pattern C） ✅
+---
 
-## 現在のファイル構成
+## 次のステップ: Render.comへのデプロイ
 
-```
-mix-poker-app/
-├── server/
-│   ├── index.ts           # メインサーバーロジック
-│   ├── handEvaluator.ts   # 役判定ロジック
-│   ├── package.json       # ES Modules対応
-│   └── tsconfig.json
-├── client/
-│   ├── src/
-│   │   └── App.tsx       # メインクライアントUI
-│   ├── package.json
-│   └── vite.config.ts
-└── docs/
-    └── learning/
-        ├── 01_server_setup.md
-        ├── 02_client_connection.md
-        ├── 03_card_display.md
-        ├── 04_chip_management.md
-        ├── 05_showdown.md
-        ├── 06_game_settings_and_cards.md
-        └── 07_reshuffle.md
-```
+### 準備するもの
+- Render.comアカウント (https://render.com/)
+- GitHubアカウント（すでに接続済み）
 
-## デプロイ前のチェックリスト
+### デプロイ手順
 
-### 1. コードの整理
-- [ ] 不要なコメントの削除
-- [ ] コンソールログの整理（本番用に調整）
-- [ ] 未使用のインポートやファイルの削除
-- [ ] GameEngine.tsとgameVariants.ts（未使用）の削除
+## 1. サーバー側のデプロイ（Web Service）
 
-### 2. 環境変数の設定
-- [ ] ポート番号の環境変数化
-- [ ] CORS設定の本番用調整
-- [ ] 環境変数ファイル(.env)の作成
+### Step 1: Render.comでWeb Service作成
+1. Render.comにログイン
+2. 「New +」→「Web Service」を選択
+3. GitHubリポジトリを接続
+4. 「mix-poker-game-platform」を選択
 
-### 3. 依存関係の確認
-- [x] server/package.json の依存関係
-- [x] client/package.json の依存関係
-- [ ] セキュリティ脆弱性のチェック（npm audit）
+### Step 2: 設定を入力
+- **Name**: `mgp-server` (任意の名前)
+- **Region**: `Singapore` (最も近い地域)
+- **Branch**: `main`
+- **Root Directory**: `server`
+- **Runtime**: `Node`
+- **Build Command**: `npm install && npm run build`
+- **Start Command**: `npm start`
+- **Instance Type**: `Free`
 
-### 4. ビルドとテスト
-- [ ] サーバーのビルド確認
-- [ ] クライアントのビルド確認（npm run build）
-- [ ] ローカルでのE2Eテスト
+### Step 3: 環境変数を設定
+- `NODE_ENV`: `production`
+- `PORT`: `10000` (Renderのデフォルト)
 
-## デプロイ先の選択肢
+### Step 4: デプロイ実行
+「Create Web Service」をクリック
 
-### オプション1: Render.com（推奨・初心者向け）
-**メリット**:
-- 無料プランあり
-- 設定が簡単
-- GitHubとの連携が容易
+---
 
-**必要な作業**:
-1. Render.comアカウント作成
-2. New Web Service作成
-3. GitHubリポジトリ接続
-4. ビルドコマンド設定
-5. 環境変数設定
+## 2. クライアント側のデプロイ（Static Site）
 
-### オプション2: Railway
-**メリット**:
-- モダンなUI
-- デプロイが高速
-- PostgreSQL簡単設定
+### Step 1: Render.comでStatic Site作成
+1. Render.comに戻る
+2. 「New +」→「Static Site」を選択
+3. 同じGitHubリポジトリを選択
 
-### オプション3: Heroku
-**メリット**:
-- 老舗で安定
-- 豊富なアドオン
+### Step 2: 設定を入力
+- **Name**: `mgp-client` (任意の名前)
+- **Branch**: `main`
+- **Root Directory**: `client`
+- **Build Command**: `npm install && npm run build`
+- **Publish Directory**: `dist`
 
-**デメリット**:
-- 無料プランが廃止された
+### Step 3: 環境変数を設定
+- `VITE_SERVER_URL`: `https://mgp-server.onrender.com` (Step 1で作成したサーバーのURL)
 
-## デプロイ手順（Render.com想定）
+### Step 4: デプロイ実行
+「Create Static Site」をクリック
+
+---
+
+## 3. デプロイ後の確認
 
 ### サーバー側
-
-1. **package.jsonにビルドスクリプト追加**
-```json
-{
-  "scripts": {
-    "start": "node dist/index.js",
-    "build": "tsc",
-    "dev": "ts-node index.ts"
-  }
-}
-```
-
-2. **Render.com設定**
-- Build Command: `cd server && npm install && npm run build`
-- Start Command: `cd server && npm start`
-- Environment: Node
+- Render.comのログで起動を確認
+- `🚀 Server is running on http://localhost:10000` が表示されればOK
 
 ### クライアント側
+- デプロイ完了後、URLにアクセス
+- 接続ボタンが表示されることを確認
 
-1. **ビルド確認**
+### 動作確認
+1. クライアントのURLにアクセス
+2. 「Connect」ボタンをクリック
+3. プレイヤー名を入力して「Join Game」
+4. カードを引いて動作確認
+
+---
+
+## トラブルシューティング
+
+### サーバーが起動しない
+- ログを確認: `npm install`が成功しているか
+- 環境変数が正しく設定されているか
+- `package.json`の`start`スクリプトが正しいか
+
+### クライアントが接続できない
+- `VITE_SERVER_URL`が正しいサーバーURLになっているか
+- サーバーが起動しているか
+- CORSエラーが出ていないか（サーバーログ確認）
+
+### ビルドが失敗する
+- ローカルで`npm run build`が成功するか確認
+- Node.jsのバージョンが合っているか（18以上）
+
+---
+
+## 無料プランの制限
+
+### Render.com Free Tier
+- **Web Service**:
+  - 15分間アクセスがないと自動的にスリープ
+  - 再起動に30秒〜1分程度かかる
+  - 月750時間まで無料
+
+- **Static Site**:
+  - 常時稼働
+  - 100GB/月の帯域幅
+
+### 注意点
+- 初回アクセス時は起動に時間がかかる
+- 本番環境として使う場合は有料プランを検討
+
+---
+
+## GitHubへの今後の更新
+
+コードを変更した後：
+
 ```bash
-cd client
-npm run build
+git add .
+git commit -m "変更内容の説明"
+git push
 ```
 
-2. **静的サイトとしてデプロイ**
-- Build Command: `cd client && npm install && npm run build`
-- Publish Directory: `client/dist`
+Render.comは自動的に検知して再デプロイします（Auto-Deploy有効の場合）。
 
-### 環境変数設定例
+---
 
-**サーバー側**:
-```
-PORT=3000
-NODE_ENV=production
-CLIENT_URL=https://your-client-app.onrender.com
-```
+## 完了チェックリスト
 
-**クライアント側**:
-```
-VITE_SERVER_URL=https://your-server-app.onrender.com
-```
-
-## 現在の既知の問題
-
-### 軽微な問題
-1. **exchange-cardsハンドラー**: グローバルデッキ対応が不完全（動作には影響なし）
-2. **対戦相手カード表示UI**: 未実装（将来の拡張）
-3. **GameEngine.ts/gameVariants.ts**: 未使用ファイル（削除推奨）
-
-### 対応不要の警告
-- Node.js Deprecation Warning (fs.Stats): ライブラリ内部の問題で対応不要
-- TypeScript lint errors (GameEngine.ts): 使用していないファイルなので削除予定
-
-## 次のステップ
-
-1. ✅ 学習ノート作成完了
-2. 🔄 デプロイ前のコード整理
-3. ⬜ GitHubリポジトリ作成・プッシュ
-4. ⬜ Render.comでデプロイ
-5. ⬜ 動作確認
-6. ⬜ データベース連携（PostgreSQL）- 将来の拡張
-
-## まとめ
-
-現時点で基本的な機能はすべて実装済みです。デプロイに向けて、コードの整理とビルド確認を行えば、すぐにでもオンラインで遊べる状態になります。
+- [ ] Render.comアカウント作成
+- [ ] サーバー側デプロイ完了
+- [ ] クライアント側デプロイ完了
+- [ ] 環境変数設定完了
+- [ ] 動作確認完了
+- [ ] URLをREADME.mdに追記
