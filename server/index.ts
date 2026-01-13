@@ -7,6 +7,11 @@ import { evaluateHand, compareHands } from './handEvaluator.js';
 const app = express();
 app.use(cors());
 
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'Mix Poker Game Server is running' });
+});
+
 const httpServer = createServer(app);
 // Socket.ioの設定 (CORS許可: どこからでも接続OKにする)
 const io = new Server(httpServer, {
