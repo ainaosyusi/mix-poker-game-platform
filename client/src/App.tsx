@@ -137,7 +137,12 @@ function App() {
       setHasJoined(false);
       setShowdownResult(null);
     });
-  };
+
+    // Cleanup function
+    return () => {
+      socket.disconnect();
+    };
+  }, []); // Empty dependency array means this runs once on mount
 
   const disconnectFromServer = () => {
     if (socketRef.current) {
@@ -230,14 +235,7 @@ function App() {
 
       {/* Connection Controls */}
       <div style={{ marginBottom: '30px', display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-        {!isConnected ? (
-          <button
-            onClick={connectToServer}
-            style={buttonStyle('#4CAF50', '#2e7d32')}
-          >
-            Connect to Server
-          </button>
-        ) : !hasJoined ? (
+        {!hasJoined ? (
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <input
               type="text"
