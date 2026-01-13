@@ -73,16 +73,18 @@ function App() {
   const [opponentCards, setOpponentCards] = useState<OpponentCards[]>([]);
   const socketRef = useRef<Socket | null>(null);
 
-  const connectToServer = () => {
-    if (socketRef.current?.connected) return;
-
-    // サーバーに接続
-    const socket = io('http://localhost:3000');
+  // This useEffect handles the initial connection and socket event listeners
+  useEffect(() => {
+    // Connect to server using environment variable
+    const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
+    console.log('Connecting to server:', serverUrl);
+    const socket = io(serverUrl);
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      console.log('✅ Connected to server');
       setIsConnected(true);
-      setServerMsg('Connecting...');
+      setServerMsg('Connected'); // Update server message on successful connection
     });
 
     socket.on('welcome', (data) => {
