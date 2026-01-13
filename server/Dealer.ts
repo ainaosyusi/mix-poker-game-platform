@@ -42,7 +42,7 @@ export class Dealer {
      * @param count 各プレイヤーに配る枚数（デフォルト2）
      */
     dealHoleCards(deck: string[], players: (Player | null)[], count: number = 2): void {
-        const activePlayers = players.filter(p => p !== null && p.status !== 'SIT_OUT') as Player[];
+        const activePlayers = players.filter(p => p !== null && p.stack > 0) as Player[];
 
         // ラウンドロビン方式で配布
         for (let i = 0; i < count; i++) {
@@ -108,7 +108,7 @@ export class Dealer {
         let attempts = 0;
         while (attempts < maxPlayers) {
             const player = room.players[nextIndex];
-            if (player !== null && player.status !== 'SIT_OUT') {
+            if (player !== null && player.stack > 0) {
                 room.dealerBtnIndex = nextIndex;
                 return nextIndex;
             }
@@ -157,7 +157,7 @@ export class Dealer {
 
         // アクティブなプレイヤー数を数える
         const activePlayers = room.players.filter(p =>
-            p !== null && p.status !== 'SIT_OUT' && p.stack > 0
+            p !== null && p.stack > 0
         );
 
         if (activePlayers.length < 2) {
@@ -243,5 +243,113 @@ export class Dealer {
         }
         room.gameState.board = [];
         room.gameState.pot = { main: 0, side: [] };
+    }
+
+    /**
+     * スタッド用カード配布（3rd Street: 2 down + 1 up）
+     */
+    dealStudInitial(deck: string[], players: (Player | null)[]): void {
+        const activePlayers = players.filter(p => p !== null && p.stack > 0) as Player[];
+
+        // 2枚ダウンカード
+        for (let i = 0; i < 2; i++) {
+            for (const player of activePlayers) {
+                if (deck.length === 0) throw new Error('Deck is empty');
+                const card = deck.shift()!;
+                if (!player.hand) player.hand = [];
+                player.hand.push(card);
+            }
+        }
+
+        // 1枚アップカード
+        for (const player of activePlayers) {
+            if (deck.length === 0) throw new Error('Deck is empty');
+            const card = deck.shift()!;
+            player.hand!.push(card);
+            // アップカードはstudUpCardsに記録
+            if (!player.studUpCards) player.studUpCards = [];
+            player.studUpCards.push(card);
+        }
+
+        console.log('🎴 Dealt Stud 3rd Street: 2 down + 1 up');
+    }
+
+    /**
+     * スタッド用追加カード配布（4th-6th Street: up cards）
+     */
+    dealStudStreet(deck: string[], players: (Player | null)[], isLastStreet: boolean = false): void {
+        const activePlayers = players.filter(p =>
+            p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
+        ) as Player[];
+
+        for (const player of activePlayers) {
+            if (deck.length === 0) throw new Error('Deck is empty');
+            const card = deck.shift()!;
+            player.hand!.push(card);
+
+            // 7th Streetはダウンカード、それ以外はアップカード
+            if (!isLastStreet) {
+                if (!player.studUpCards) player.studUpCards = [];
+                player.studUpCards.push(card);
+            }
+        }
+
+        console.log(`🎴 Dealt Stud street: ${isLastStreet ? 'down card' : 'up card'}`);
+    }
+
+    /**
+     * ドロー交換処理
+     * @param deck デッキ
+     * @param player プレイヤー
+     * @param discardIndexes 捨てるカードのインデックス配列
+     */
+    exchangeDrawCards(deck: string[], player: Player, discardIndexes: number[]): void {
+        if (!player.hand) return;
+
+        const discardCount = discardIndexes.length;
+        if (deck.length < discardCount) {
+            throw new Error('Not enough cards for draw exchange');
+        }
+
+        // Sort indexes in descending order to avoid index shift issues
+        const sortedIndexes = [...discardIndexes].sort((a, b) => b - a);
+
+        // Remove discarded cards
+        for (const idx of sortedIndexes) {
+            if (idx >= 0 && idx < player.hand.length) {
+                player.hand.splice(idx, 1);
+            }
+        }
+
+        // Deal new cards
+        for (let i = 0; i < discardCount; i++) {
+            const card = deck.shift()!;
+            player.hand.push(card);
+        }
+
+        console.log(`🔄 ${player.name} exchanged ${discardCount} cards`);
+    }
+
+    /**
+     * リシャッフル（Pattern C: 高度なアルゴリズム）
+     * デッキが不足した場合、ディスカードパイルとスタブを合わせてリシャッフル
+     */
+    reshuffleIfNeeded(deck: string[], discardPile: string[], requiredCards: number): string[] {
+        if (deck.length >= requiredCards) {
+            return deck; // 十分なカードがある
+        }
+
+        console.log(`⚠️ Deck low (${deck.length} cards), need ${requiredCards}. Reshuffling...`);
+
+        // スタブとディスカードを合わせる
+        const combined = [...deck, ...discardPile];
+        const reshuffled = this.shuffle(combined);
+
+        console.log(`✅ Reshuffled ${combined.length} cards`);
+
+        // ディスカードパイルをクリア
+        discardPile.length = 0;
+
+        return reshuffled;
     }
 }

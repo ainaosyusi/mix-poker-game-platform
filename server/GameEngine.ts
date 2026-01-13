@@ -40,7 +40,7 @@ export class GameEngine {
 
         // プレイヤーの状態をリセット
         for (const player of room.players) {
-            if (player && player.status !== 'SIT_OUT' && player.stack > 0) {
+            if (player && player.stack > 0) {
                 player.status = 'ACTIVE';
                 player.hand = null;
                 player.bet = 0;
@@ -178,7 +178,30 @@ export class GameEngine {
             p !== null && p.status === 'ACTIVE'
         );
 
+        // アクション可能なプレイヤーとALL INプレイヤーを取得
+        const allInPlayers = room.players.filter(p =>
+            p !== null && p.status === 'ALL_IN'
+        );
+
+        const remainingPlayers = room.players.filter(p =>
+            p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
+        );
+
         // 1人以下なら終了
+        if (remainingPlayers.length <= 1) {
+            this.endHand(room);
+            return;
+        }
+
+        // 全員ALL INの場合、自動的にリバーまで進めてショーダウン
+        if (actionablePlayers.length === 0 && allInPlayers.length >= 2) {
+            console.log('💥 All players ALL IN - auto-dealing to showdown');
+            this.dealToShowdown(room);
+            this.endHand(room);
+            return;
+        }
+
+        // アクション可能なプレイヤーが1人以下なら終了
         if (actionablePlayers.length <= 1) {
             this.endHand(room);
             return;
@@ -245,6 +268,22 @@ export class GameEngine {
                 return;
         }
 
+        // ストリート進行後、再度ALL INチェック
+        const actionablePlayers = room.players.filter(p =>
+            p !== null && p.status === 'ACTIVE'
+        );
+
+        const allInPlayers = room.players.filter(p =>
+            p !== null && p.status === 'ALL_IN'
+        );
+
+        // 全員ALL INなら自動的に次へ進む
+        if (actionablePlayers.length === 0 && allInPlayers.length >= 2) {
+            console.log('💥 All players still ALL IN - continuing auto-deal');
+            this.nextStreet(room);
+            return;
+        }
+
         // ボタンの次のアクティブプレイヤーから開始
         room.activePlayerIndex = this.dealer.getNextActivePlayer(room, room.dealerBtnIndex);
     }
@@ -255,30 +294,8 @@ export class GameEngine {
     endHand(room: Room): void {
         console.log(`\n🏁 Hand #${room.gameState.handNumber} ended`);
 
-        // 勝者判定
-        const activePlayers = room.players.filter(p =>
-            p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
-        ) as Player[];
-
-        if (activePlayers.length === 1) {
-            // 他全員フォールド
-            const winner = activePlayers[0];
-            winner.stack += room.gameState.pot.main;
-            console.log(`🏆 ${winner.name} wins ${room.gameState.pot.main} (others folded)`);
-        } else {
-            // ショーダウン - 次のステップで詳細実装
-            console.log('🎭 Showdown - winner determination pending');
-            // TODO: handEvaluatorを使った勝者判定
-        }
-
-        // ローテーションチェック
-        const rotation = this.rotationManager.checkRotation(room);
-        if (rotation.changed) {
-            console.log(`🔄 Next game: ${rotation.nextGame}`);
-        }
-
-        // 状態をWAITINGに
-        room.gameState.status = 'WAITING' as any;
+        // 状態をSHOWDOWNに設定（クライアント通知用）
+        room.gameState.status = 'SHOWDOWN' as any;
         room.activePlayerIndex = -1;
     }
 
@@ -287,7 +304,7 @@ export class GameEngine {
      */
     getSeatedPlayers(room: Room): Player[] {
         return room.players.filter(p =>
-            p !== null && p.status !== 'SIT_OUT' && p.stack > 0
+            p !== null && p.stack > 0
         ) as Player[];
     }
 
@@ -324,5 +341,32 @@ export class GameEngine {
      */
     getDeck(): string[] {
         return this.deck;
+    }
+
+    /**
+     * ALL IN時に残りのストリートを自動で配る
+     */
+    private dealToShowdown(room: Room): void {
+        const phase = room.gameState.status;
+
+        // 現在のフェーズから順にリバーまで配る
+        if (phase === 'PREFLOP') {
+            room.gameState.board = this.dealer.dealFlop(this.deck);
+            console.log(`🃏 Auto-Flop: ${room.gameState.board.join(' ')}`);
+            room.gameState.board.push(this.dealer.dealTurn(this.deck));
+            console.log(`🃏 Auto-Turn: ${room.gameState.board[3]}`);
+            room.gameState.board.push(this.dealer.dealRiver(this.deck));
+            console.log(`🃏 Auto-River: ${room.gameState.board[4]}`);
+        } else if (phase === 'FLOP') {
+            room.gameState.board.push(this.dealer.dealTurn(this.deck));
+            console.log(`🃏 Auto-Turn: ${room.gameState.board[3]}`);
+            room.gameState.board.push(this.dealer.dealRiver(this.deck));
+            console.log(`🃏 Auto-River: ${room.gameState.board[4]}`);
+        } else if (phase === 'TURN') {
+            room.gameState.board.push(this.dealer.dealRiver(this.deck));
+            console.log(`🃏 Auto-River: ${room.gameState.board[4]}`);
+        }
+
+        room.gameState.status = 'RIVER' as any;
     }
 }

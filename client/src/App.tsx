@@ -7,6 +7,7 @@ function App() {
   // Phase 3-A: Routing State
   const [currentView, setCurrentView] = useState<'name' | 'lobby' | 'table'>('name');
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
+  const [initialRoomData, setInitialRoomData] = useState<any>(null);
   const [playerName, setPlayerName] = useState('');
   const [myId, setMyId] = useState('');
 
@@ -35,13 +36,15 @@ function App() {
   }, []);
 
   // Routing Handlers
-  const handleJoinRoom = (roomId: string) => {
+  const handleJoinRoom = (roomId: string, roomData?: any) => {
     setCurrentRoomId(roomId);
+    setInitialRoomData(roomData || null);
     setCurrentView('table');
   };
 
   const handleLeaveRoom = () => {
     setCurrentRoomId(null);
+    setInitialRoomData(null);
     setCurrentView('lobby');
   };
 
@@ -132,6 +135,7 @@ function App() {
       <Table
         socket={socketRef.current}
         roomId={currentRoomId || ''}
+        initialRoomData={initialRoomData}
         yourSocketId={myId}
         onLeaveRoom={handleLeaveRoom}
       />

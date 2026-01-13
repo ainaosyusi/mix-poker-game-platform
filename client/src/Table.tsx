@@ -41,6 +41,7 @@ type ActionType = 'FOLD' | 'CHECK' | 'CALL' | 'BET' | 'RAISE' | 'ALL_IN';
 interface TableProps {
     socket: Socket | null;
     roomId: string;
+    initialRoomData: Room | null;
     yourSocketId: string;
     onLeaveRoom: () => void;
 }
@@ -68,8 +69,8 @@ function Card({ card }: { card: string }) {
     );
 }
 
-export function Table({ socket, roomId, yourSocketId, onLeaveRoom }: TableProps) {
-    const [room, setRoom] = useState<Room | null>(null);
+export function Table({ socket, roomId, initialRoomData, yourSocketId, onLeaveRoom }: TableProps) {
+    const [room, setRoom] = useState<Room | null>(initialRoomData);
     const [buyInAmount, setBuyInAmount] = useState(500);
     const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
     const [yourHand, setYourHand] = useState<string[]>([]);
@@ -143,7 +144,15 @@ export function Table({ socket, roomId, yourSocketId, onLeaveRoom }: TableProps)
     };
 
     if (!room) {
-        return <div style={{ padding: '20px', textAlign: 'center' }}>読み込み中...</div>;
+        return (
+            <div style={{ padding: '20px', textAlign: 'center' }}>
+                <h3>部屋のデータを取得中...</h3>
+                <p>ルームID: {roomId}</p>
+                <button onClick={onLeaveRoom} style={{ padding: '10px 20px', marginTop: '20px' }}>
+                    ロビーに戻る
+                </button>
+            </div>
+        );
     }
 
     const yourSeatIndex = room.players.findIndex(p => p?.socketId === yourSocketId);

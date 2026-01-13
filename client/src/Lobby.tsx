@@ -22,7 +22,7 @@ interface RoomConfig {
 interface LobbyProps {
     socket: Socket | null;
     playerName: string;
-    onJoinRoom: (roomId: string) => void;
+    onJoinRoom: (roomId: string, roomData?: any) => void;
 }
 
 export function Lobby({ socket, playerName, onJoinRoom }: LobbyProps) {
@@ -60,7 +60,7 @@ export function Lobby({ socket, playerName, onJoinRoom }: LobbyProps) {
         // 部屋参加成功 - テーブルに遷移
         socket.on('room-joined', (data: { room: any; yourSocketId: string }) => {
             console.log('✅ Joined room:', data.room.id);
-            onJoinRoom(data.room.id);
+            onJoinRoom(data.room.id, data.room);
         });
 
         // エラーハンドリング

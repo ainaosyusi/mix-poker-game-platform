@@ -15,6 +15,7 @@ import type {
   PlayerStatus,
   ActionType
 } from './types.js';
+import { RotationManager } from './RotationManager.js';
 
 // Phase 3-B: ゲームエンジンインスタンス（部屋ごとに管理）
 const gameEngines: Map<string, GameEngine> = new Map();
@@ -617,8 +618,29 @@ io.on('connection', (socket) => {
 
       // ショーダウンチェック
       if (room.gameState.status === 'SHOWDOWN') {
-        const showdownResult = showdownManager.executeShowdown(room);
+        // アクティブなプレイヤーをチェック
+        const activePlayers = room.players.filter(p =>
+          p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
+        );
+
+        let showdownResult;
+        if (activePlayers.length === 1) {
+          // 1人しか残っていない（他全員フォールド）
+          showdownResult = showdownManager.awardToLastPlayer(room);
+        } else {
+          // ショーダウン実行
+          showdownResult = showdownManager.executeShowdown(room);
+        }
+
         io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
+
+        // ローテーションチェック
+        const rotationMgr = new RotationManager();
+        const rotation = rotationMgr.checkRotation(room);
+        if (rotation.changed) {
+          console.log(`🔄 Next game: ${rotation.nextGame}`);
+        }
+
         room.gameState.status = 'WAITING' as any;
       }
 
