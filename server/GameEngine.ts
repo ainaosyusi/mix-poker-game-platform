@@ -45,6 +45,8 @@ export class GameEngine {
                 player.hand = null;
                 player.bet = 0;
                 player.totalBet = 0;
+                // Stud用のアップカードもクリア
+                if (player.studUpCards) player.studUpCards = [];
             }
         }
 
@@ -57,23 +59,47 @@ export class GameEngine {
         // デッキを作成
         this.deck = this.dealer.createDeck();
 
-        // ボタンを移動
-        this.dealer.moveButton(room);
-
-        // ブラインド徴収
-        const { sbIndex, bbIndex } = this.dealer.collectBlinds(room);
-        room.gameState.currentBet = room.config.bigBlind;
-
-        // ホールカードを配布（バリアントに応じた枚数）
+        // ゲームバリアント取得
         const variantConfig = getVariantConfig(room.gameState.gameVariant);
-        const holeCardCount = variantConfig.communityCardType === 'flop' ? variantConfig.holeCardCount : 2;
-        this.dealer.dealHoleCards(this.deck, room.players, holeCardCount);
 
-        // フェーズをPREFLOPに
-        room.gameState.status = 'PREFLOP' as any; // GameStatus -> GamePhase
+        // ボタンを移動（ボタンありゲームのみ）
+        if (variantConfig.hasButton) {
+            this.dealer.moveButton(room);
+        }
 
-        // アクティブプレイヤーを設定（BBの次から）
-        room.activePlayerIndex = this.dealer.getNextActivePlayer(room, bbIndex);
+        // ブラインド徴収（ボタンありゲームのみ、Studはアンティ）
+        let sbIndex = -1;
+        let bbIndex = -1;
+        if (variantConfig.hasButton) {
+            const blinds = this.dealer.collectBlinds(room);
+            sbIndex = blinds.sbIndex;
+            bbIndex = blinds.bbIndex;
+            room.gameState.currentBet = room.config.bigBlind;
+        }
+
+        // バリアントに応じたカード配布
+        if (variantConfig.communityCardType === 'stud') {
+            // Stud: 3rd Street (2 down + 1 up)
+            this.dealer.dealStudInitial(this.deck, room.players);
+            room.gameState.status = 'PREFLOP' as any; // Studでも便宜上PREFLOPとする
+        } else if (variantConfig.hasDrawPhase) {
+            // Draw: 5枚配布
+            this.dealer.dealHoleCards(this.deck, room.players, variantConfig.holeCardCount);
+            room.gameState.status = 'PREFLOP' as any;
+        } else {
+            // Flop games (NLH, PLO): ホールカード配布
+            this.dealer.dealHoleCards(this.deck, room.players, variantConfig.holeCardCount);
+            room.gameState.status = 'PREFLOP' as any;
+        }
+
+        // アクティブプレイヤーを設定
+        if (variantConfig.hasButton && bbIndex !== -1) {
+            // ボタンありゲーム: BBの次から
+            room.activePlayerIndex = this.dealer.getNextActivePlayer(room, bbIndex);
+        } else {
+            // Studなど: 最も弱いアップカードから（簡易実装：座席0から）
+            room.activePlayerIndex = this.dealer.getNextActivePlayer(room, -1);
+        }
 
         console.log(`✅ Hand started. Active player: seat ${room.activePlayerIndex}`);
 

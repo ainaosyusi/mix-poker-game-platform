@@ -183,9 +183,10 @@ export function Table({ socket, roomId, initialRoomData, yourSocketId, onLeaveRo
                 </div>
             )}
 
-            {/* コミュニティカード */}
+            {/* コミュニティカード - Always show when available */}
             {room.gameState.board.length > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '20px' }}>
+                    <span style={{ fontSize: '18px', fontWeight: 'bold', marginRight: '10px', alignSelf: 'center' }}>Board:</span>
                     {room.gameState.board.map((card, i) => (
                         <Card key={i} card={card} />
                     ))}
@@ -224,7 +225,7 @@ export function Table({ socket, roomId, initialRoomData, yourSocketId, onLeaveRo
                                 <>
                                     <div style={{ fontWeight: 'bold' }}>{player.name} {isYou && '(you)'}</div>
                                     <div style={{ fontSize: '14px' }}>💰 {player.stack}</div>
-                                    {player.bet > 0 && <div style={{ fontSize: '14px', color: '#ff9800' }}>Bet: {player.bet}</div>}
+                                    {player.bet > 0 && <div style={{ fontSize: '14px', color: '#ff9800' }}>Bet: {player.bet} (Total: {player.totalBet})</div>}
                                     <div style={{ fontSize: '12px', color: '#888' }}>{player.status}</div>
                                 </>
                             ) : (
@@ -285,22 +286,79 @@ export function Table({ socket, roomId, initialRoomData, yourSocketId, onLeaveRo
                                 style={{ width: '80px', padding: '8px', background: '#1a1a1a', color: 'white', border: '1px solid #555', borderRadius: '4px' }}
                             />
                             <button onClick={() => handleAction(validActions.includes('BET') ? 'BET' : 'RAISE', betAmount)} style={{ padding: '12px 24px', background: '#ff9800', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-                                {validActions.includes('BET') ? 'BET' : 'RAISE'} {betAmount}
+                                {validActions.includes('BET') ? `BET ${betAmount}` : `RAISE to ${(room.players[yourSeatIndex]?.bet || 0) + betAmount}`}
                             </button>
                         </div>
                     )}
                 </div>
             )}
 
-            {/* ショーダウン結果 */}
+            {/* ショーダウン結果 - PokerStars style */}
             {showdownResult && (
-                <div style={{ background: '#4CAF50', padding: '20px', borderRadius: '8px', marginTop: '20px', textAlign: 'center' }}>
-                    <h2>🏆 ショーダウン結果</h2>
-                    {showdownResult.winners.map((w: any, i: number) => (
-                        <div key={i} style={{ fontSize: '18px' }}>
-                            {w.playerName}: {w.handRank} - {w.amount}チップ獲得！
+                <div style={{
+                    background: 'linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%)',
+                    padding: '30px',
+                    borderRadius: '12px',
+                    marginTop: '20px',
+                    textAlign: 'center',
+                    border: '3px solid #60a5fa',
+                    boxShadow: '0 8px 16px rgba(0,0,0,0.3)'
+                }}>
+                    <h2 style={{ margin: '0 0 20px 0', fontSize: '28px', color: '#fbbf24' }}>🏆 SHOWDOWN</h2>
+
+                    {/* Winners */}
+                    <div style={{ marginBottom: '20px' }}>
+                        <h3 style={{ color: '#10b981', fontSize: '20px' }}>Winners</h3>
+                        {showdownResult.winners.map((w: any, i: number) => (
+                            <div key={i} style={{
+                                background: 'rgba(16, 185, 129, 0.2)',
+                                padding: '15px',
+                                borderRadius: '8px',
+                                margin: '10px 0',
+                                border: '2px solid #10b981'
+                            }}>
+                                <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#fff' }}>
+                                    {w.playerName}
+                                </div>
+                                <div style={{ fontSize: '16px', color: '#d1d5db', margin: '5px 0' }}>
+                                    {w.handRank}
+                                </div>
+                                <div style={{ display: 'flex', gap: '5px', justifyContent: 'center', margin: '10px 0' }}>
+                                    {w.hand && w.hand.map((card: string, ci: number) => (
+                                        <Card key={ci} card={card} />
+                                    ))}
+                                </div>
+                                <div style={{ fontSize: '20px', color: '#fbbf24', fontWeight: 'bold' }}>
+                                    +{w.amount} chips
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Other players' hands */}
+                    {showdownResult.allHands && showdownResult.allHands.length > 0 && (
+                        <div>
+                            <h3 style={{ color: '#9ca3af', fontSize: '16px' }}>Other Players</h3>
+                            {showdownResult.allHands
+                                .filter((h: any) => !showdownResult.winners.some((w: any) => w.playerId === h.playerId))
+                                .map((h: any, i: number) => (
+                                    <div key={i} style={{
+                                        background: 'rgba(55, 65, 81, 0.5)',
+                                        padding: '10px',
+                                        borderRadius: '6px',
+                                        margin: '5px 0'
+                                    }}>
+                                        <div style={{ fontSize: '16px', color: '#9ca3af' }}>{h.playerName}</div>
+                                        <div style={{ display: 'flex', gap: '5px', justifyContent: 'center', margin: '5px 0' }}>
+                                            {h.hand && h.hand.map((card: string, ci: number) => (
+                                                <Card key={ci} card={card} />
+                                            ))}
+                                        </div>
+                                        {h.handRank && <div style={{ fontSize: '14px', color: '#6b7280' }}>{h.handRank}</div>}
+                                    </div>
+                                ))}
                         </div>
-                    ))}
+                    )}
                 </div>
             )}
 

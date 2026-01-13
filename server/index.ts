@@ -16,6 +16,7 @@ import type {
   ActionType
 } from './types.js';
 import { RotationManager } from './RotationManager.js';
+import { MetaGameManager } from './MetaGameManager.js';
 
 // Phase 3-B: ゲームエンジンインスタンス（部屋ごとに管理）
 const gameEngines: Map<string, GameEngine> = new Map();
@@ -634,11 +635,27 @@ io.on('connection', (socket) => {
 
         io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
 
+        // 7-2ゲームボーナスチェック
+        const metaGameMgr = new MetaGameManager();
+        if (showdownResult.winners.length > 0) {
+          for (const winner of showdownResult.winners) {
+            const bonus = metaGameMgr.checkSevenDeuce(room, winner.playerId, winner.hand);
+            if (bonus) {
+              io.to(`room:${roomId}`).emit('seven-deuce-bonus', bonus);
+              console.log(`🎲 7-2 BONUS: ${winner.playerName} wins ${bonus.amount}`);
+            }
+          }
+        }
+
         // ローテーションチェック
         const rotationMgr = new RotationManager();
         const rotation = rotationMgr.checkRotation(room);
         if (rotation.changed) {
           console.log(`🔄 Next game: ${rotation.nextGame}`);
+          io.to(`room:${roomId}`).emit('next-game', {
+            nextGame: rotation.nextGame,
+            gamesList: room.rotation.gamesList
+          });
         }
 
         room.gameState.status = 'WAITING' as any;
