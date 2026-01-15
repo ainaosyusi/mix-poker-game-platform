@@ -21,10 +21,10 @@
 ヘルスが「Ok」（緑色）になったら：
 
 1. 「環境の概要」セクションの **「ドメイン」** を確認
-2. URLが表示されています（例: `mgp-production.ap-northeast-1.elasticbeanstalk.com`）
+2. URLが表示されています（例: `mgp-production.xxxxx.elasticbeanstalk.com`）
 3. **このURLをコピー**してください
 
-**完全なURL**: `http://mgp-production.ap-northeast-1.elasticbeanstalk.com`
+**完全なURL**: `http://mgp-production.xxxxx.elasticbeanstalk.com`
 （`http://` から始まることに注意！）
 
 ---
@@ -43,7 +43,7 @@
 3. **「変数を追加」** をクリック
 4. 以下を入力：
    - **変数**: `VITE_SERVER_URL`
-   - **値**: `http://mgp-production.ap-northeast-1.elasticbeanstalk.com`
+   - **値**: `http://mgp-production.xxxxx.elasticbeanstalk.com`
      （あなたのElastic BeanstalkのURL）
 5. **「保存」** をクリック
 
@@ -62,7 +62,7 @@
 再デプロイが完了したら：
 
 1. **Amplify の URL にアクセス**
-   - `https://main.d7kdvjnb6y0vk.amplifyapp.com`
+   - `https://main.xxxxx.amplifyapp.com`
 
 2. **接続テスト**
    - 「Connect」ボタンをクリック
@@ -132,7 +132,7 @@
 すべてのテストが成功したら、**デプロイ完了**です！
 
 ### 公開URL
-`https://main.d7kdvjnb6y0vk.amplifyapp.com`
+`https://main.xxxxx.amplifyapp.com`
 
 ### 次のステップ（オプション）
 

@@ -30,7 +30,7 @@
    - ターゲットグループ: エ8080
 
 4. **環境変数の更新**
-   - `CLIENT_URL`: `https://main.d7kdvjnb6y0vk.amplifyapp.com`
+   - `CLIENT_URL`: `https://main.xxxxx.amplifyapp.com`
 
 5. **Amplify環境変数の更新**
    - `VITE_SERVER_URL`: `https://新しいURL.elasticbeanstalk.com`

@@ -1,68 +1,1062 @@
+/* ========================================
+   Mix Poker - Casino Style CSS
+   リアルカジノ風デザイン
+   ======================================== */
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  /* カラーパレット */
+  --felt-green: #1a6b1a;
+  --felt-dark: #0d4a0d;
+  --wood-light: #8B4513;
+  --wood-dark: #5D3A1A;
+  --gold: #fbbf24;
+  --gold-dark: #d97706;
+  --card-red: #dc2626;
+  --card-black: #1a1a1a;
+
+  /* チップカラー */
+  --chip-white: #ffffff;
+  --chip-red: #dc2626;
+  --chip-blue: #2563eb;
+  --chip-green: #16a34a;
+  --chip-black: #1f2937;
+
+  /* UI カラー */
+  --bg-dark: #0a0a0a;
+  --bg-card: #1a1a1a;
+  --bg-panel: #2d2d2d;
+  --text-primary: #ffffff;
+  --text-secondary: #9ca3af;
+  --border-color: #333;
+
+  /* フォント */
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
+  color-scheme: dark;
+  color: var(--text-primary);
+  background-color: var(--bg-dark);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%);
+}
+
+#root {
+  width: 100%;
   min-height: 100vh;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+/* ========================================
+   POKER TABLE - リアルカジノ風
+   ======================================== */
+
+.poker-table-container {
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 20px;
 }
 
-button {
+.poker-table {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2.2 / 1;
+  border-radius: 50% / 45%;
+
+  /* フェルトのグラデーション */
+  background:
+    radial-gradient(ellipse 100% 100% at 50% 50%,
+      var(--felt-green) 0%,
+      #145a14 30%,
+      var(--felt-dark) 60%,
+      #0a3d0a 100%);
+
+  /* 木製の縁 */
+  border: 18px solid;
+  border-image: linear-gradient(
+    180deg,
+    var(--wood-light) 0%,
+    var(--wood-dark) 30%,
+    #3d2914 60%,
+    var(--wood-dark) 100%
+  ) 1;
+
+  /* 影と立体感 */
+  box-shadow:
+    /* 外側の影 */
+    0 30px 80px rgba(0, 0, 0, 0.7),
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    /* 内側の影（フェルトの凹み）*/
+    inset 0 0 80px rgba(0, 0, 0, 0.4),
+    inset 0 0 20px rgba(0, 0, 0, 0.3);
+}
+
+/* テーブルロゴ */
+.table-logo {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, 100%);
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.15);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* レール（クッション部分）のハイライト */
+.table-rail {
+  position: absolute;
+  inset: -8px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 -4px 8px rgba(255, 255, 255, 0.1),
+    inset 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ========================================
+   CARD STYLES - リアルなカード
+   ======================================== */
+
+.poker-card {
+  position: relative;
   border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  background: linear-gradient(
+    145deg,
+    #ffffff 0%,
+    #f8f8f8 50%,
+    #f0f0f0 100%
+  );
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.3),
+    0 2px 4px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  overflow: hidden;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
+.poker-card::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+}
+
+.poker-card:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.4),
+    0 4px 8px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.poker-card.red { color: var(--card-red); }
+.poker-card.black { color: var(--card-black); }
+
+.card-content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 4px;
+}
+
+.card-corner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+}
+
+.card-corner.top-left {
+  align-self: flex-start;
+}
+
+.card-corner.bottom-right {
+  align-self: flex-end;
+  transform: rotate(180deg);
+}
+
+.card-rank {
+  font-weight: 700;
+}
+
+.card-suit {
+  margin-top: -2px;
+}
+
+.card-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  opacity: 0.3;
+}
+
+.card-center-suit {
+  font-weight: 400;
+}
+
+/* カード裏面 */
+.card-back {
+  position: relative;
+  border-radius: 8px;
+  background: linear-gradient(
+    135deg,
+    #1e40af 0%,
+    #1d4ed8 30%,
+    #2563eb 50%,
+    #1d4ed8 70%,
+    #1e40af 100%
+  );
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.3),
+    0 2px 4px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+}
+
+.card-back-pattern {
+  position: absolute;
+  inset: 4px;
+  border-radius: 4px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 5px,
+    rgba(255, 255, 255, 0.05) 5px,
+    rgba(255, 255, 255, 0.05) 10px
+  );
+}
+
+/* コミュニティカード */
+.community-cards {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+}
+
+.community-cards-area {
+  z-index: 10;
+}
+
+/* ホールカード */
+.hole-cards {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ========================================
+   PLAYER SEAT - プレイヤー席
+   ======================================== */
+
+.player-seat {
+  position: absolute;
+  width: 130px;
+  background: linear-gradient(
+    180deg,
+    rgba(40, 40, 40, 0.95) 0%,
+    rgba(25, 25, 25, 0.95) 100%
+  );
+  border-radius: 12px;
+  padding: 12px 10px;
+  text-align: center;
+  border: 2px solid var(--border-color);
+  backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.player-seat.active {
+  border-color: var(--gold);
+  box-shadow:
+    0 0 30px rgba(251, 191, 36, 0.4),
+    0 6px 20px rgba(0, 0, 0, 0.5);
+  animation: pulse-active 2s infinite;
+}
+
+.player-seat.is-you {
+  border-color: #3b82f6;
+  background: linear-gradient(
+    180deg,
+    rgba(30, 64, 175, 0.3) 0%,
+    rgba(25, 25, 25, 0.95) 100%
+  );
+}
+
+.player-seat.folded {
+  opacity: 0.5;
+  filter: grayscale(50%);
+}
+
+.player-seat.all-in {
+  border-color: #ef4444;
+  animation: pulse-allin 1.5s infinite;
+}
+
+.player-seat.empty {
+  background: rgba(255, 255, 255, 0.03);
+  border: 2px dashed rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-seat.empty:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.player-seat.empty.selected {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.empty-seat-content {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.selected-indicator {
+  color: #10b981;
+  font-weight: 600;
+}
+
+/* プレイヤー情報 */
+.player-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-avatar {
+  font-size: 28px;
+  transition: opacity 0.3s;
+}
+
+.player-avatar.dimmed {
+  opacity: 0.4;
+}
+
+.player-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+
+.player-name.is-you {
+  color: #60a5fa;
+}
+
+.you-indicator {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin-left: 4px;
+}
+
+.player-stack {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.chip-icon {
+  font-size: 14px;
+}
+
+.player-status {
+  min-height: 18px;
+}
+
+.status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.status-badge.all-in {
+  background: linear-gradient(145deg, #ef4444, #dc2626);
+  color: white;
+}
+
+.status-badge.folded {
+  background: rgba(107, 114, 128, 0.5);
+  color: #9ca3af;
+}
+
+.status-badge.sit-out {
+  background: rgba(107, 114, 128, 0.3);
+  color: #6b7280;
+}
+
+/* ========================================
+   POSITION MARKERS - ポジションマーカー
+   ======================================== */
+
+.dealer-btn {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(145deg, var(--gold), var(--gold-dark));
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--bg-dark);
+  box-shadow:
+    0 3px 8px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  z-index: 30;
+}
+
+.position-marker {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  z-index: 30;
+}
+
+.sb-marker {
+  background: linear-gradient(145deg, #64748b, #475569);
+}
+
+.bb-marker {
+  background: linear-gradient(145deg, #3b82f6, #1d4ed8);
+}
+
+/* ========================================
+   PLAYER BET - ベット表示
+   ======================================== */
+
+.player-bet {
+  position: absolute;
+  z-index: 15;
+}
+
+.bet-chips {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.chip-stack-visual {
+  position: relative;
+  width: 30px;
+  height: 30px;
+}
+
+.chip-stack-visual .chip {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, var(--chip-green), #15803d);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.4),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.2),
+    inset 0 2px 4px rgba(255, 255, 255, 0.2);
+  border: 2px dashed rgba(255, 255, 255, 0.4);
+}
+
+.bet-amount-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+/* ========================================
+   POT DISPLAY - ポット表示
+   ======================================== */
+
+.pot-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 15;
+  background: linear-gradient(
+    145deg,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(20, 20, 20, 0.85) 100%
+  );
+  padding: 16px 28px;
+  border-radius: 24px;
+  border: 2px solid rgba(251, 191, 36, 0.3);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+.pot-chips {
+  display: flex;
+  justify-content: center;
+}
+
+.chip-pile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.chip-pile .chip {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.4),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.2),
+    inset 0 2px 4px rgba(255, 255, 255, 0.2);
+  border: 2px dashed rgba(255, 255, 255, 0.4);
+}
+
+.chip.chip-green { background: linear-gradient(145deg, var(--chip-green), #15803d); }
+.chip.chip-blue { background: linear-gradient(145deg, var(--chip-blue), #1d4ed8); }
+.chip.chip-red { background: linear-gradient(145deg, var(--chip-red), #991b1b); }
+
+.pot-info {
+  text-align: center;
+}
+
+.pot-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.pot-amount {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--gold);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.side-pots {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.side-pot {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+/* ========================================
+   ACTION PANEL - アクションパネル
+   ======================================== */
+
+.action-panel {
+  background: linear-gradient(
+    180deg,
+    rgba(30, 30, 30, 0.98) 0%,
+    rgba(15, 15, 15, 0.98) 100%
+  );
+  border-radius: 20px;
+  padding: 24px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.action-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.action-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.pot-info-mini {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.action-buttons-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  padding: 14px 28px;
+  font-size: 15px;
+  font-weight: 700;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 100px;
+}
+
+.action-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+}
+
+.action-btn:active {
+  transform: translateY(0);
+}
+
+.action-btn.fold {
+  background: linear-gradient(145deg, #4b5563, #374151);
+  color: white;
+}
+
+.action-btn.fold:hover {
+  background: linear-gradient(145deg, #6b7280, #4b5563);
+}
+
+.action-btn.check {
+  background: linear-gradient(145deg, #10b981, #059669);
+  color: white;
+}
+
+.action-btn.check:hover {
+  background: linear-gradient(145deg, #34d399, #10b981);
+}
+
+.action-btn.call {
+  background: linear-gradient(145deg, #3b82f6, #1d4ed8);
+  color: white;
+}
+
+.action-btn.call:hover {
+  background: linear-gradient(145deg, #60a5fa, #3b82f6);
+}
+
+.action-btn.bet {
+  background: linear-gradient(145deg, var(--gold), var(--gold-dark));
+  color: var(--bg-dark);
+}
+
+.action-btn.bet:hover {
+  background: linear-gradient(145deg, #fcd34d, var(--gold));
+}
+
+.action-btn.all-in {
+  background: linear-gradient(145deg, #ef4444, #dc2626);
+  color: white;
+  animation: pulse-allin 2s infinite;
+}
+
+.action-btn.all-in:hover {
+  background: linear-gradient(145deg, #f87171, #ef4444);
+}
+
+/* ベットコントロール */
+.bet-controls {
+  margin-top: 16px;
+}
+
+.bet-controls-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+  margin-bottom: 16px;
+}
+
+.quick-bet-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.quick-bet-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.quick-bet-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.quick-bet-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bet-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.slider-min, .slider-max {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 50px;
+  text-align: center;
+}
+
+.bet-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #3b82f6 0%, var(--gold) 100%);
+  outline: none;
+}
+
+.bet-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #e0e0e0);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.1s;
+}
+
+.bet-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+}
+
+.bet-submit-row {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  align-items: center;
+}
+
+.bet-input {
+  width: 100px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.bet-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+/* ========================================
+   SHOWDOWN PANEL - ショーダウン結果
+   ======================================== */
+
+.showdown-panel {
+  background: linear-gradient(
+    135deg,
+    #1e3a8a 0%,
+    #2563eb 50%,
+    #1e3a8a 100%
+  );
+  border-radius: 20px;
+  padding: 32px;
+  border: 3px solid #60a5fa;
+  box-shadow:
+    0 16px 50px rgba(0, 0, 0, 0.5),
+    0 0 30px rgba(59, 130, 246, 0.3);
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.showdown-panel h2 {
+  text-align: center;
+  font-size: 28px;
+  color: var(--gold);
+  margin-bottom: 24px;
+}
+
+.winner-display {
+  background: rgba(16, 185, 129, 0.2);
+  border: 2px solid #10b981;
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  margin-bottom: 16px;
+  animation: winner-glow 2s infinite;
+}
+
+.winner-display .player-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 8px;
+}
+
+.winner-display .hand-rank {
+  font-size: 16px;
+  color: #d1d5db;
+  margin-bottom: 16px;
+}
+
+.winner-display .cards-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.winner-display .win-amount {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--gold);
+}
+
+.loser-display {
+  background: rgba(75, 85, 99, 0.4);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  margin-top: 8px;
+  opacity: 0.8;
+}
+
+/* ========================================
+   ANIMATIONS - アニメーション
+   ======================================== */
+
+@keyframes pulse-active {
+  0%, 100% {
+    box-shadow:
+      0 0 20px rgba(251, 191, 36, 0.4),
+      0 6px 20px rgba(0, 0, 0, 0.5);
   }
-  a:hover {
-    color: #747bff;
+  50% {
+    box-shadow:
+      0 0 40px rgba(251, 191, 36, 0.6),
+      0 6px 20px rgba(0, 0, 0, 0.5);
   }
-  button {
-    background-color: #f9f9f9;
+}
+
+@keyframes pulse-allin {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(239, 68, 68, 0.7);
+  }
+}
+
+@keyframes winner-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 50px rgba(16, 185, 129, 0.6);
+  }
+}
+
+@keyframes card-deal {
+  from {
+    transform: translateY(-80px) rotate(-15deg) scale(0.8);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) rotate(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.card-animate {
+  animation: card-deal 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* ========================================
+   UTILITY CLASSES
+   ======================================== */
+
+.text-gold { color: var(--gold); }
+.text-green { color: #10b981; }
+.text-blue { color: #3b82f6; }
+.text-gray { color: var(--text-secondary); }
+.text-red { color: #ef4444; }
+
+/* ========================================
+   RESPONSIVE - レスポンシブ対応
+   ======================================== */
+
+@media (max-width: 768px) {
+  .poker-table-container {
+    padding: 10px;
+  }
+
+  .poker-table {
+    border-width: 12px;
+    aspect-ratio: 1.8 / 1;
+  }
+
+  .player-seat {
+    width: 100px;
+    padding: 8px 6px;
+    font-size: 12px;
+  }
+
+  .player-avatar {
+    font-size: 22px;
+  }
+
+  .player-name {
+    font-size: 12px;
+    max-width: 85px;
+  }
+
+  .player-stack {
+    font-size: 12px;
+  }
+
+  .dealer-btn {
+    width: 22px;
+    height: 22px;
+    font-size: 10px;
+  }
+
+  .position-marker {
+    width: 20px;
+    height: 20px;
+    font-size: 8px;
+  }
+
+  .pot-display {
+    padding: 12px 20px;
+  }
+
+  .pot-amount {
+    font-size: 20px;
+  }
+
+  .action-panel {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .action-btn {
+    padding: 12px 20px;
+    font-size: 13px;
+    min-width: 80px;
+  }
+
+  .poker-card {
+    width: 45px !important;
+    height: 63px !important;
+  }
+
+  .community-cards {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .poker-table {
+    aspect-ratio: 1.5 / 1;
+  }
+
+  .player-seat {
+    width: 80px;
+    padding: 6px 4px;
+  }
+
+  .player-avatar {
+    font-size: 18px;
+  }
+
+  .player-name {
+    font-size: 10px;
+    max-width: 70px;
+  }
+
+  .player-stack {
+    font-size: 10px;
+  }
+
+  .action-buttons-row {
+    gap: 8px;
+  }
+
+  .action-btn {
+    padding: 10px 16px;
+    font-size: 12px;
+    min-width: 70px;
+  }
+
+  .quick-bet-row {
+    gap: 6px;
+  }
+
+  .quick-bet-btn {
+    padding: 6px 10px;
+    font-size: 11px;
   }
 }

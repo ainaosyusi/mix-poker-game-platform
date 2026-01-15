@@ -140,8 +140,21 @@ export class ShowdownManager {
         const potState = this.potManager.calculatePots(room.players);
         const totalPot = this.potManager.getTotalPot(potState);
 
-        // ポット分配
-        const winnerIds = winningPlayers.map(w => ({
+        // 勝者をボタン位置に基づいてソート（OOP優先）
+        // 端数チップ（Odd Chip）をポジション的に不利なプレイヤーから順に配分するため
+        const btnIndex = room.dealerBtnIndex;
+        const maxPlayers = room.config.maxPlayers;
+
+        const sortedWinners = winningPlayers
+            .map(w => {
+                const seatIndex = room.players.findIndex(p => p?.socketId === w.player.socketId);
+                // ボタンからの距離を計算 (SB=0, BB=1, ..., ボタン=maxPlayers-1)
+                const distance = (seatIndex - btnIndex + maxPlayers - 1) % maxPlayers;
+                return { ...w, seatIndex, distance };
+            })
+            .sort((a, b) => a.distance - b.distance);
+
+        const winnerIds = sortedWinners.map(w => ({
             playerId: w.player.socketId,
             rank: w.handResult.rank
         }));

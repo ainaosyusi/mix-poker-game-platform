@@ -75,7 +75,7 @@ export function Lobby({ socket, playerName, onJoinRoom }: LobbyProps) {
             socket.off('room-joined');
             socket.off('error');
         };
-    }, [socket, onJoinRoom]);
+    }, [socket, onJoinRoom, playerName]);
 
     const handleCreateRoom = () => {
         console.log('🔵 handleCreateRoom called');

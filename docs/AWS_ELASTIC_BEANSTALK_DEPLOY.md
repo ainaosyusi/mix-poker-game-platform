@@ -3,7 +3,7 @@
 ## 所要時間: 15-20分
 
 ## フロントエンドURL（メモ）
-`https://main.d7kdvjnb6y0vk.amplifyapp.com`
+`https://main.xxxxx.amplifyapp.com`
 
 ---
 
@@ -147,7 +147,7 @@ zip -r ../mgp-server.zip . -x "node_modules/*" -x "dist/*" -x ".DS_Store"
 |------|-----|
 | `NODE_ENV` | `production` |
 | `PORT` | `8080` |
-| `CLIENT_URL` | `https://main.d7kdvjnb6y0vk.amplifyapp.com` |
+| `CLIENT_URL` | `https://main.xxxxx.amplifyapp.com` |
 
 5. **「適用」** をクリック
 6. 環境が更新されるまで2-3分待つ
@@ -179,7 +179,7 @@ zip -r ../mgp-server.zip . -x "node_modules/*" -x "dist/*" -x ".DS_Store"
 ### Step 16: 完全な動作テスト
 
 1. **Amplify の URL にアクセス**
-   - `https://main.d7kdvjnb6y0vk.amplifyapp.com`
+   - `https://main.xxxxx.amplifyapp.com`
 
 2. **「Connect」ボタンをクリック**
    - ✅ 接続成功のメッセージが表示される
@@ -245,6 +245,6 @@ zip -r ../mgp-server.zip . -x "node_modules/*" -x "dist/*" -x ".DS_Store"
 
 おめでとうございます！Mix Poker Game Platform が AWS で本番稼働しています！
 
-**公開URL**: `https://main.d7kdvjnb6y0vk.amplifyapp.com`
+**公開URL**: `https://main.xxxxx.amplifyapp.com`
 
 友達とシェアして遊べます！

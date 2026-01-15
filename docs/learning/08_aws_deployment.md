@@ -157,9 +157,9 @@ const socket = io(serverUrl);
 
 **エラーメッセージ**:
 ```
-[blocked] The page at https://main.d7kdvjnb6y0vk.amplifyapp.com/ 
+[blocked] The page at https://main.xxxxx.amplifyapp.com/ 
 requested insecure content from 
-http://mgp-production.ap-northeast-1.elasticbeanstalk.com/
+http://mgp-production.xxxxx.elasticbeanstalk.com/
 ```
 
 **原因**: HTTPSページからHTTPリソースにアクセスすることは、セキュリティ上ブロックされる
@@ -176,13 +176,13 @@ http://mgp-production.ap-northeast-1.elasticbeanstalk.com/
 #### Elastic Beanstalk（バックエンド）
 ```bash
 PORT=8080
-CLIENT_URL=https://main.d7kdvjnb6y0vk.amplifyapp.com
+CLIENT_URL=https://main.xxxxx.amplifyapp.com
 NODE_ENV=production
 ```
 
 #### AWS Amplify（フロントエンド）
 ```bash
-VITE_SERVER_URL=http://mgp-production.ap-northeast-1.elasticbeanstalk.com
+VITE_SERVER_URL=http://mgp-production.xxxxx.elasticbeanstalk.com
 ```
 
 ### ログの活用
@@ -226,8 +226,8 @@ Elastic Beanstalkでは複数のログファイルで問題を診断：
 ## 成果物
 
 ### デプロイされたURL
-- **フロントエンド**: `https://main.d7kdvjnb6y0vk.amplifyapp.com`
-- **バックエンド**: `http://mgp-production.ap-northeast-1.elasticbeanstalk.com`
+- **フロントエンド**: `https://main.xxxxx.amplifyapp.com`
+- **バックエンド**: `http://mgp-production.xxxxx.elasticbeanstalk.com`
 
 ### 作成したドキュメント
 - `docs/AWS_ACCOUNT_SETUP.md`
