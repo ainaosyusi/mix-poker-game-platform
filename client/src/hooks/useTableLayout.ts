@@ -100,12 +100,12 @@ export function useTableLayout({ maxPlayers, containerRef }: UseTableLayoutOptio
   };
 }
 
-// ポット位置を計算（テーブル中央）
+// ポット位置を計算（コミュニティカードの下）
 export function getPotPosition(): React.CSSProperties {
   return {
     position: 'absolute',
     left: '50%',
-    top: '45%',
+    top: '58%',
     transform: 'translate(-50%, -50%)',
   };
 }

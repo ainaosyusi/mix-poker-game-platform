@@ -4,8 +4,19 @@
  */
 
 import type { Room, Player, PotState } from './types.js';
-import { evaluateHand, compareHands } from './handEvaluator.js';
+import {
+    evaluateHand,
+    compareHands,
+    evaluateLowHand8OrBetter,
+    evaluateRazzHand,
+    evaluateBadugiHand,
+    evaluateDeuceSeven,
+    compareLowHands,
+    compareBadugiHands,
+    compareDeuceSeven
+} from './handEvaluator.js';
 import { PotManager } from './PotManager.js';
+import { getVariantConfig } from './gameVariants.js';
 
 // カード文字列をCardオブジェクトに変換
 interface Card {
@@ -60,6 +71,140 @@ function getBestFiveCards(cards: Card[]): Card[] {
     return bestHand;
 }
 
+// PLO用: 手札から2枚、ボードから3枚を使用して最強の5枚を選ぶ
+function getBestPLOFiveCards(holeCards: Card[], boardCards: Card[]): Card[] {
+    if (holeCards.length < 2 || boardCards.length < 3) {
+        // フォールバック: 通常の評価
+        return getBestFiveCards([...holeCards, ...boardCards]);
+    }
+
+    let bestHand = [...holeCards.slice(0, 2), ...boardCards.slice(0, 3)];
+    let bestRank = evaluateHand(bestHand);
+
+    // 手札から2枚選ぶ組み合わせ (C(4,2) = 6通り、または C(n,2))
+    for (let h1 = 0; h1 < holeCards.length; h1++) {
+        for (let h2 = h1 + 1; h2 < holeCards.length; h2++) {
+            // ボードから3枚選ぶ組み合わせ (C(5,3) = 10通り)
+            for (let b1 = 0; b1 < boardCards.length; b1++) {
+                for (let b2 = b1 + 1; b2 < boardCards.length; b2++) {
+                    for (let b3 = b2 + 1; b3 < boardCards.length; b3++) {
+                        const hand = [
+                            holeCards[h1], holeCards[h2],
+                            boardCards[b1], boardCards[b2], boardCards[b3]
+                        ];
+                        const rank = evaluateHand(hand);
+                        if (rank.rank > bestRank.rank) {
+                            bestHand = hand;
+                            bestRank = rank;
+                        } else if (rank.rank === bestRank.rank) {
+                            const comparison = compareHands(hand, bestHand);
+                            if (comparison > 0) {
+                                bestHand = hand;
+                                bestRank = rank;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return bestHand;
+}
+
+// PLO8用: 手札から2枚、ボードから3枚を使用して最強のローハンド5枚を選ぶ
+function getBestPLOLowFiveCards(holeCards: Card[], boardCards: Card[]): Card[] | null {
+    if (holeCards.length < 2 || boardCards.length < 3) {
+        return null;
+    }
+
+    let bestHand: Card[] | null = null;
+    let bestLow = evaluateLowHand8OrBetter([]);
+
+    // 手札から2枚選ぶ組み合わせ
+    for (let h1 = 0; h1 < holeCards.length; h1++) {
+        for (let h2 = h1 + 1; h2 < holeCards.length; h2++) {
+            // ボードから3枚選ぶ組み合わせ
+            for (let b1 = 0; b1 < boardCards.length; b1++) {
+                for (let b2 = b1 + 1; b2 < boardCards.length; b2++) {
+                    for (let b3 = b2 + 1; b3 < boardCards.length; b3++) {
+                        const hand = [
+                            holeCards[h1], holeCards[h2],
+                            boardCards[b1], boardCards[b2], boardCards[b3]
+                        ];
+                        const lowResult = evaluateLowHand8OrBetter(hand);
+                        if (lowResult.valid) {
+                            if (!bestHand || compareLowHands(lowResult, bestLow) > 0) {
+                                bestHand = hand;
+                                bestLow = lowResult;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return bestHand;
+}
+
+// 7枚から最強のローハンド5枚を選ぶ（8-or-better）
+function getBestLowFiveCards(cards: Card[]): Card[] | null {
+    if (cards.length < 5) return null;
+
+    let bestHand: Card[] | null = null;
+    let bestLow = evaluateLowHand8OrBetter([]);
+
+    // すべての5枚の組み合わせを試す
+    for (let i = 0; i < cards.length; i++) {
+        for (let j = i + 1; j < cards.length; j++) {
+            for (let k = j + 1; k < cards.length; k++) {
+                for (let l = k + 1; l < cards.length; l++) {
+                    for (let m = l + 1; m < cards.length; m++) {
+                        const hand = [cards[i], cards[j], cards[k], cards[l], cards[m]];
+                        const lowResult = evaluateLowHand8OrBetter(hand);
+                        if (lowResult.valid) {
+                            if (!bestHand || compareLowHands(lowResult, bestLow) > 0) {
+                                bestHand = hand;
+                                bestLow = lowResult;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return bestHand;
+}
+
+// Razz用: 7枚から最強のローハンド5枚を選ぶ
+function getBestRazzFiveCards(cards: Card[]): Card[] {
+    if (cards.length <= 5) return cards;
+
+    let bestHand = cards.slice(0, 5);
+    let bestLow = evaluateRazzHand(bestHand);
+
+    for (let i = 0; i < cards.length; i++) {
+        for (let j = i + 1; j < cards.length; j++) {
+            for (let k = j + 1; k < cards.length; k++) {
+                for (let l = k + 1; l < cards.length; l++) {
+                    for (let m = l + 1; m < cards.length; m++) {
+                        const hand = [cards[i], cards[j], cards[k], cards[l], cards[m]];
+                        const lowResult = evaluateRazzHand(hand);
+                        if (compareLowHands(lowResult, bestLow) > 0) {
+                            bestHand = hand;
+                            bestLow = lowResult;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return bestHand;
+}
+
 export interface ShowdownResult {
     winners: {
         playerId: string;
@@ -71,8 +216,9 @@ export interface ShowdownResult {
     allHands: {
         playerId: string;
         playerName: string;
-        hand: string[];
+        hand: string[] | null;  // nullの場合はマック（非表示）
         handRank: string;
+        isMucked?: boolean;     // マックされたかどうか
     }[];
 }
 
@@ -84,10 +230,55 @@ export class ShowdownManager {
     }
 
     /**
+     * ショーダウン順序を決定
+     * - ラストアグレッサーがいる場合: アグレッサーから時計回り
+     * - いない場合（全員チェック）: ボタンの左（SB位置）から時計回り
+     */
+    private getShowdownOrder(room: Room, players: Player[]): Player[] {
+        const maxPlayers = room.config.maxPlayers;
+        const lastAggressorIdx = room.lastAggressorIndex;
+        const buttonIdx = room.dealerBtnIndex;
+
+        // プレイヤーのseatIndexを取得
+        const playerSeats = players.map(p => {
+            const seatIdx = room.players.findIndex(rp => rp?.socketId === p.socketId);
+            return { player: p, seatIndex: seatIdx };
+        });
+
+        let startIndex: number;
+        if (lastAggressorIdx !== -1 && room.players[lastAggressorIdx]) {
+            // ラストアグレッサーがいる場合、その人から開始
+            startIndex = lastAggressorIdx;
+        } else {
+            // 全員チェックの場合、ボタンの次（SB位置）から開始
+            startIndex = (buttonIdx + 1) % maxPlayers;
+        }
+
+        // startIndexから時計回りにソート
+        playerSeats.sort((a, b) => {
+            const distA = (a.seatIndex - startIndex + maxPlayers) % maxPlayers;
+            const distB = (b.seatIndex - startIndex + maxPlayers) % maxPlayers;
+            return distA - distB;
+        });
+
+        return playerSeats.map(ps => ps.player);
+    }
+
+    /**
+     * オールインが発生しているかチェック
+     */
+    private hasAllInPlayer(room: Room): boolean {
+        return room.players.some(p => p !== null && p.status === 'ALL_IN');
+    }
+
+    /**
      * ショーダウンを実行し、勝者を決定してポットを分配
+     * ゲームバリアントに応じた評価を行う
      */
     executeShowdown(room: Room): ShowdownResult {
         const board = room.gameState.board;
+        const variant = room.gameState.gameVariant;
+        const variantConfig = getVariantConfig(variant);
 
         // アクティブなプレイヤーを取得
         const showdownPlayers = room.players.filter(p =>
@@ -100,10 +291,43 @@ export class ShowdownManager {
             return { winners: [], allHands: [] };
         }
 
+        // ゲームバリアントに応じた評価
+        switch (variantConfig.handEvaluation) {
+            case 'highlow':
+                return this.executeHiLoShowdown(room, showdownPlayers, board);
+            case 'razz':
+                return this.executeRazzShowdown(room, showdownPlayers, board);
+            case 'badugi':
+                return this.executeBadugiShowdown(room, showdownPlayers);
+            case '2-7':
+                return this.executeDeuce7Showdown(room, showdownPlayers);
+            default:
+                return this.executeHighShowdown(room, showdownPlayers, board);
+        }
+    }
+
+    /**
+     * ハイハンドのみの評価（NLH, PLO等）
+     */
+    private executeHighShowdown(room: Room, players: Player[], board: string[]): ShowdownResult {
+        const variant = room.gameState.gameVariant;
+        const isPLO = variant === 'PLO' || variant === 'PLO8';
+        const isAllInShowdown = this.hasAllInPlayer(room);
+
+        // ショーダウン順序を決定
+        const orderedPlayers = this.getShowdownOrder(room, players);
+
         // 各プレイヤーの手役を評価
-        const evaluations = showdownPlayers.map(player => {
-            const allCards = parseCards([...player.hand!, ...board]);
-            const bestFive = getBestFiveCards(allCards);
+        const evaluations = orderedPlayers.map(player => {
+            const holeCards = parseCards(player.hand!);
+            const boardCards = parseCards(board);
+
+            // PLO: 手札2枚 + ボード3枚の組み合わせ
+            // NLH: 7枚から最強の5枚
+            const bestFive = isPLO
+                ? getBestPLOFiveCards(holeCards, boardCards)
+                : getBestFiveCards([...holeCards, ...boardCards]);
+
             const handResult = evaluateHand(bestFive);
 
             return {
@@ -114,71 +338,28 @@ export class ShowdownManager {
             };
         });
 
-        // 全員の手役を記録
-        const allHands = evaluations.map(e => ({
-            playerId: e.player.socketId,
-            playerName: e.player.name,
-            hand: e.player.hand!,
-            handRank: e.handRank
-        }));
+        // サイドポット対応のポット分配（勝者の決定）
+        const winners = this.distributeToWinnersWithSidePots(room, evaluations, compareHands);
+        const winnerIds = new Set(winners.map(w => w.playerId));
 
-        // 最強の手を見つける
-        let bestEval = evaluations[0];
-        for (let i = 1; i < evaluations.length; i++) {
-            const comparison = compareHands(evaluations[i].bestFive, bestEval.bestFive);
-            if (comparison > 0) {
-                bestEval = evaluations[i];
-            }
+        // 手札の表示/マック判定
+        let allHands: ShowdownResult['allHands'];
+
+        if (isAllInShowdown) {
+            // オールインの場合: 全員強制オープン（共謀防止）
+            // ハンドはコピーして参照問題を防ぐ
+            allHands = evaluations.map(e => ({
+                playerId: e.player.socketId,
+                playerName: e.player.name,
+                hand: [...e.player.hand!],  // 深いコピー
+                handRank: e.handRank,
+                isMucked: false
+            }));
+            console.log(`🏆 All-In Showdown: All hands revealed`);
+        } else {
+            // 通常ショーダウン: 順序に従ってShow/Muck判定
+            allHands = this.determineShowMuck(evaluations, winnerIds, compareHands);
         }
-
-        // 同じ強さの手を持つプレイヤーを見つける（スプリット）
-        const winningPlayers = evaluations.filter(e =>
-            compareHands(e.bestFive, bestEval.bestFive) === 0
-        );
-
-        // ポットを再計算
-        const potState = this.potManager.calculatePots(room.players);
-        const totalPot = this.potManager.getTotalPot(potState);
-
-        // 勝者をボタン位置に基づいてソート（OOP優先）
-        // 端数チップ（Odd Chip）をポジション的に不利なプレイヤーから順に配分するため
-        const btnIndex = room.dealerBtnIndex;
-        const maxPlayers = room.config.maxPlayers;
-
-        const sortedWinners = winningPlayers
-            .map(w => {
-                const seatIndex = room.players.findIndex(p => p?.socketId === w.player.socketId);
-                // ボタンからの距離を計算 (SB=0, BB=1, ..., ボタン=maxPlayers-1)
-                const distance = (seatIndex - btnIndex + maxPlayers - 1) % maxPlayers;
-                return { ...w, seatIndex, distance };
-            })
-            .sort((a, b) => a.distance - b.distance);
-
-        const winnerIds = sortedWinners.map(w => ({
-            playerId: w.player.socketId,
-            rank: w.handResult.rank
-        }));
-
-        const distributions = this.potManager.distributePots(potState, winnerIds);
-
-        // 勝者にチップを渡す
-        const winners = winningPlayers.map(w => {
-            const dist = distributions.find(d => d.playerId === w.player.socketId);
-            const amount = dist?.amount || 0;
-
-            w.player.stack += amount;
-
-            return {
-                playerId: w.player.socketId,
-                playerName: w.player.name,
-                hand: w.player.hand!,
-                handRank: w.handRank,
-                amount
-            };
-        });
-
-        // ポットをリセット
-        room.gameState.pot = { main: 0, side: [] };
 
         console.log(`🏆 Showdown: ${winners.map(w => `${w.playerName} wins ${w.amount} (${w.handRank})`).join(', ')}`);
 
@@ -186,7 +367,601 @@ export class ShowdownManager {
     }
 
     /**
+     * ショーダウン順序に従ってShow/Muckを判定
+     * - 1番手: 必ずShow
+     * - 2番手以降: 現在のベストより強いか同じならShow、弱ければMuck
+     */
+    private determineShowMuck<T extends { player: Player; bestFive: Card[]; handRank: string }>(
+        evaluations: T[],
+        winnerIds: Set<string>,
+        compareFunc: (a: Card[], b: Card[]) => number
+    ): ShowdownResult['allHands'] {
+        let currentBestFive: Card[] | null = null;
+
+        return evaluations.map((e, index) => {
+            // 1番手は必ずShow
+            if (index === 0) {
+                currentBestFive = e.bestFive;
+                return {
+                    playerId: e.player.socketId,
+                    playerName: e.player.name,
+                    hand: [...e.player.hand!],  // 深いコピー
+                    handRank: e.handRank,
+                    isMucked: false
+                };
+            }
+
+            // 2番手以降: 現在のベストと比較
+            const comparison = compareFunc(e.bestFive, currentBestFive!);
+
+            if (comparison > 0) {
+                // 勝っている → Show & ベスト更新
+                currentBestFive = e.bestFive;
+                return {
+                    playerId: e.player.socketId,
+                    playerName: e.player.name,
+                    hand: [...e.player.hand!],  // 深いコピー
+                    handRank: e.handRank,
+                    isMucked: false
+                };
+            } else if (comparison === 0) {
+                // 引き分け → Show（ポット分割の権利）
+                return {
+                    playerId: e.player.socketId,
+                    playerName: e.player.name,
+                    hand: [...e.player.hand!],  // 深いコピー
+                    handRank: e.handRank,
+                    isMucked: false
+                };
+            } else {
+                // 負けている → Muck
+                return {
+                    playerId: e.player.socketId,
+                    playerName: e.player.name,
+                    hand: null,
+                    handRank: 'Mucked',
+                    isMucked: true
+                };
+            }
+        });
+    }
+
+    /**
+     * Hi-Lo評価（PLO8, 7CS8等）
+     * ポットをハイとローで半分ずつ分ける
+     * 注: Hi-Loでは、HighまたはLowのいずれかで勝てる場合にShow。両方で負ける場合のみMuck。
+     */
+    private executeHiLoShowdown(room: Room, players: Player[], board: string[]): ShowdownResult {
+        const totalPot = room.gameState.pot.main +
+            room.gameState.pot.side.reduce((sum, s) => sum + s.amount, 0);
+
+        const variant = room.gameState.gameVariant;
+        const isPLO8 = variant === 'PLO8';
+        const isAllInShowdown = this.hasAllInPlayer(room);
+        const orderedPlayers = this.getShowdownOrder(room, players);
+
+        // ハイハンド評価（ショーダウン順序で評価）
+        const highEvaluations = orderedPlayers.map(player => {
+            const holeCards = parseCards(player.hand!);
+            const boardCards = parseCards(board);
+
+            // PLO8: 手札2枚 + ボード3枚の組み合わせ
+            // 7CS8: 7枚から最強の5枚
+            const bestFive = isPLO8
+                ? getBestPLOFiveCards(holeCards, boardCards)
+                : getBestFiveCards([...holeCards, ...boardCards]);
+
+            const handResult = evaluateHand(bestFive);
+            return { player, bestFive, handResult, handRank: handResult.name };
+        });
+
+        // ローハンド評価
+        const lowEvaluations = orderedPlayers.map(player => {
+            const holeCards = parseCards(player.hand!);
+            const boardCards = parseCards(board);
+
+            // PLO8: 手札2枚 + ボード3枚の組み合わせ
+            // 7CS8: 7枚から最強の5枚
+            const bestLowFive = isPLO8
+                ? getBestPLOLowFiveCards(holeCards, boardCards)
+                : getBestLowFiveCards([...holeCards, ...boardCards]);
+
+            const lowResult = bestLowFive ? evaluateLowHand8OrBetter(bestLowFive) : { valid: false, cards: [], name: 'No Low' };
+            return { player, bestLowFive, lowResult, handRank: lowResult.name };
+        }).filter(e => e.lowResult.valid);
+
+        const winners: ShowdownResult['winners'] = [];
+
+        // ローの勝者がいるかチェック
+        const hasLowWinner = lowEvaluations.length > 0;
+        const highPot = hasLowWinner ? Math.floor(totalPot / 2) : totalPot;
+        const lowPot = hasLowWinner ? totalPot - highPot : 0;
+
+        // ハイの勝者
+        let bestHighEval = highEvaluations[0];
+        for (const e of highEvaluations) {
+            if (compareHands(e.bestFive, bestHighEval.bestFive) > 0) {
+                bestHighEval = e;
+            }
+        }
+        const highWinners = highEvaluations.filter(e =>
+            compareHands(e.bestFive, bestHighEval.bestFive) === 0
+        );
+
+        const highShare = Math.floor(highPot / highWinners.length);
+        for (const w of highWinners) {
+            w.player.stack += highShare;
+            winners.push({
+                playerId: w.player.socketId,
+                playerName: w.player.name,
+                hand: [...w.player.hand!],  // 深いコピー
+                handRank: `High: ${w.handRank}`,
+                amount: highShare
+            });
+        }
+
+        // ローの勝者
+        if (hasLowWinner) {
+            let bestLowEval = lowEvaluations[0];
+            for (const e of lowEvaluations) {
+                if (compareLowHands(e.lowResult, bestLowEval.lowResult) > 0) {
+                    bestLowEval = e;
+                }
+            }
+            const lowWinners = lowEvaluations.filter(e =>
+                compareLowHands(e.lowResult, bestLowEval.lowResult) === 0
+            );
+
+            const lowShare = Math.floor(lowPot / lowWinners.length);
+            for (const w of lowWinners) {
+                w.player.stack += lowShare;
+                // 既にハイで勝った場合は金額を追加
+                const existing = winners.find(win => win.playerId === w.player.socketId);
+                if (existing) {
+                    existing.amount += lowShare;
+                    existing.handRank += ` / Low: ${w.handRank}`;
+                } else {
+                    winners.push({
+                        playerId: w.player.socketId,
+                        playerName: w.player.name,
+                        hand: [...w.player.hand!],  // 深いコピー
+                        handRank: `Low: ${w.handRank}`,
+                        amount: lowShare
+                    });
+                }
+            }
+        }
+
+        room.gameState.pot = { main: 0, side: [] };
+
+        // 勝者のIDセット
+        const winnerIds = new Set(winners.map(w => w.playerId));
+
+        // 手札の表示/マック判定
+        const allHands = highEvaluations.map(e => {
+            const isWinner = winnerIds.has(e.player.socketId);
+            const lowEval = lowEvaluations.find(le => le.player.socketId === e.player.socketId);
+            const rankStr = isWinner
+                ? (lowEval ? `High: ${e.handRank} / Low: ${lowEval.handRank}` : `High: ${e.handRank}`)
+                : 'Mucked';
+            return {
+                playerId: e.player.socketId,
+                playerName: e.player.name,
+                hand: isWinner ? [...e.player.hand!] : null,  // 深いコピー
+                handRank: rankStr,
+                isMucked: !isWinner
+            };
+        });
+
+        console.log(`🏆 Hi-Lo Showdown: ${winners.map(w => `${w.playerName} wins ${w.amount} (${w.handRank})`).join(', ')}`);
+
+        return { winners, allHands };
+    }
+
+    /**
+     * Razz評価（最も低いハンドが勝ち）
+     */
+    private executeRazzShowdown(room: Room, players: Player[], board: string[]): ShowdownResult {
+        const isAllInShowdown = this.hasAllInPlayer(room);
+        const orderedPlayers = this.getShowdownOrder(room, players);
+
+        const evaluations = orderedPlayers.map(player => {
+            const allCards = parseCards([...player.hand!, ...board]);
+            const bestFive = getBestRazzFiveCards(allCards);
+            const handResult = evaluateRazzHand(bestFive);
+            return { player, bestFive, handResult, handRank: handResult.name };
+        });
+
+        // サイドポット対応: handResultを使った比較
+        const winners = this.distributeWithHandResultComparison(
+            room,
+            evaluations,
+            (a, b) => compareLowHands(a.handResult, b.handResult)
+        );
+
+        const winnerIds = new Set(winners.map(w => w.playerId));
+
+        // 手札の表示/マック判定
+        let allHands: ShowdownResult['allHands'];
+        if (isAllInShowdown) {
+            allHands = evaluations.map(e => ({
+                playerId: e.player.socketId,
+                playerName: e.player.name,
+                hand: [...e.player.hand!],  // 深いコピー
+                handRank: e.handRank,
+                isMucked: false
+            }));
+        } else {
+            allHands = this.determineShowMuckWithHandResult(
+                evaluations,
+                winnerIds,
+                (a, b) => compareLowHands(a.handResult, b.handResult)
+            );
+        }
+
+        console.log(`🏆 Razz Showdown: ${winners.map(w => `${w.playerName} wins ${w.amount} (${w.handRank})`).join(', ')}`);
+
+        return { winners, allHands };
+    }
+
+    /**
+     * Badugi評価
+     */
+    private executeBadugiShowdown(room: Room, players: Player[]): ShowdownResult {
+        const isAllInShowdown = this.hasAllInPlayer(room);
+        const orderedPlayers = this.getShowdownOrder(room, players);
+
+        const evaluations = orderedPlayers.map(player => {
+            const cards = parseCards(player.hand!);
+            const handResult = evaluateBadugiHand(cards);
+            return { player, handResult, handRank: handResult.name };
+        });
+
+        // サイドポット対応
+        const winners = this.distributeWithHandResultComparison(
+            room,
+            evaluations,
+            (a, b) => compareBadugiHands(a.handResult, b.handResult)
+        );
+
+        const winnerIds = new Set(winners.map(w => w.playerId));
+
+        // 手札の表示/マック判定
+        let allHands: ShowdownResult['allHands'];
+        if (isAllInShowdown) {
+            allHands = evaluations.map(e => ({
+                playerId: e.player.socketId,
+                playerName: e.player.name,
+                hand: [...e.player.hand!],  // 深いコピー
+                handRank: e.handRank,
+                isMucked: false
+            }));
+        } else {
+            allHands = this.determineShowMuckWithHandResult(
+                evaluations,
+                winnerIds,
+                (a, b) => compareBadugiHands(a.handResult, b.handResult)
+            );
+        }
+
+        console.log(`🏆 Badugi Showdown: ${winners.map(w => `${w.playerName} wins ${w.amount} (${w.handRank})`).join(', ')}`);
+
+        return { winners, allHands };
+    }
+
+    /**
+     * 2-7 Lowball評価
+     */
+    private executeDeuce7Showdown(room: Room, players: Player[]): ShowdownResult {
+        const isAllInShowdown = this.hasAllInPlayer(room);
+        const orderedPlayers = this.getShowdownOrder(room, players);
+
+        const evaluations = orderedPlayers.map(player => {
+            const cards = parseCards(player.hand!);
+            const handResult = evaluateDeuceSeven(cards);
+            return { player, handResult, handRank: handResult.name };
+        });
+
+        // サイドポット対応
+        const winners = this.distributeWithHandResultComparison(
+            room,
+            evaluations,
+            (a, b) => compareDeuceSeven(a.handResult, b.handResult)
+        );
+
+        const winnerIds = new Set(winners.map(w => w.playerId));
+
+        // 手札の表示/マック判定
+        let allHands: ShowdownResult['allHands'];
+        if (isAllInShowdown) {
+            allHands = evaluations.map(e => ({
+                playerId: e.player.socketId,
+                playerName: e.player.name,
+                hand: [...e.player.hand!],  // 深いコピー
+                handRank: e.handRank,
+                isMucked: false
+            }));
+        } else {
+            allHands = this.determineShowMuckWithHandResult(
+                evaluations,
+                winnerIds,
+                (a, b) => compareDeuceSeven(a.handResult, b.handResult)
+            );
+        }
+
+        console.log(`🏆 2-7 Showdown: ${winners.map(w => `${w.playerName} wins ${w.amount} (${w.handRank})`).join(', ')}`);
+
+        return { winners, allHands };
+    }
+
+    /**
+     * handResultベースのShow/Muck判定（Razz, Badugi, 2-7用）
+     */
+    private determineShowMuckWithHandResult<T extends { player: Player; handResult: any; handRank: string }>(
+        evaluations: T[],
+        winnerIds: Set<string>,
+        compareFunc: (a: T, b: T) => number
+    ): ShowdownResult['allHands'] {
+        let currentBest: T | null = null;
+
+        return evaluations.map((e, index) => {
+            // 1番手は必ずShow
+            if (index === 0) {
+                currentBest = e;
+                return {
+                    playerId: e.player.socketId,
+                    playerName: e.player.name,
+                    hand: [...e.player.hand!],  // 深いコピー
+                    handRank: e.handRank,
+                    isMucked: false
+                };
+            }
+
+            // 2番手以降: 現在のベストと比較
+            const comparison = compareFunc(e, currentBest!);
+
+            if (comparison > 0) {
+                // 勝っている → Show & ベスト更新
+                currentBest = e;
+                return {
+                    playerId: e.player.socketId,
+                    playerName: e.player.name,
+                    hand: [...e.player.hand!],  // 深いコピー
+                    handRank: e.handRank,
+                    isMucked: false
+                };
+            } else if (comparison === 0) {
+                // 引き分け → Show
+                return {
+                    playerId: e.player.socketId,
+                    playerName: e.player.name,
+                    hand: [...e.player.hand!],  // 深いコピー
+                    handRank: e.handRank,
+                    isMucked: false
+                };
+            } else {
+                // 負けている → Muck
+                return {
+                    playerId: e.player.socketId,
+                    playerName: e.player.name,
+                    hand: null,
+                    handRank: 'Mucked',
+                    isMucked: true
+                };
+            }
+        });
+    }
+
+    /**
+     * 汎用的なサイドポット対応分配（handResultを使う比較用）
+     */
+    private distributeWithHandResultComparison<T extends { player: Player; handRank: string }>(
+        room: Room,
+        allEvaluations: T[],
+        compareFunc: (a: T, b: T) => number
+    ): ShowdownResult['winners'] {
+        const winnersMap = new Map<string, { player: Player; handRank: string; amount: number }>();
+
+        // メインポットの分配
+        if (room.gameState.pot.main > 0 && allEvaluations.length > 0) {
+            let bestEval = allEvaluations[0];
+            for (const e of allEvaluations) {
+                if (compareFunc(e, bestEval) > 0) {
+                    bestEval = e;
+                }
+            }
+
+            const mainWinners = allEvaluations.filter(e => compareFunc(e, bestEval) === 0);
+            const share = Math.floor(room.gameState.pot.main / mainWinners.length);
+            const remainder = room.gameState.pot.main % mainWinners.length;
+
+            mainWinners.forEach((w, i) => {
+                const amount = share + (i < remainder ? 1 : 0);
+                w.player.stack += amount;
+                winnersMap.set(w.player.socketId, {
+                    player: w.player,
+                    handRank: w.handRank,
+                    amount
+                });
+            });
+        }
+
+        // サイドポットの分配
+        for (const sidePot of room.gameState.pot.side) {
+            if (sidePot.amount <= 0) continue;
+
+            const eligibleEvaluations = allEvaluations.filter(e =>
+                sidePot.eligiblePlayers.includes(e.player.socketId)
+            );
+            if (eligibleEvaluations.length === 0) continue;
+
+            let bestEval = eligibleEvaluations[0];
+            for (const e of eligibleEvaluations) {
+                if (compareFunc(e, bestEval) > 0) {
+                    bestEval = e;
+                }
+            }
+
+            const sideWinners = eligibleEvaluations.filter(e => compareFunc(e, bestEval) === 0);
+            const share = Math.floor(sidePot.amount / sideWinners.length);
+            const remainder = sidePot.amount % sideWinners.length;
+
+            sideWinners.forEach((w, i) => {
+                const amount = share + (i < remainder ? 1 : 0);
+                w.player.stack += amount;
+
+                const existing = winnersMap.get(w.player.socketId);
+                if (existing) {
+                    existing.amount += amount;
+                } else {
+                    winnersMap.set(w.player.socketId, {
+                        player: w.player,
+                        handRank: w.handRank,
+                        amount
+                    });
+                }
+            });
+        }
+
+        room.gameState.pot = { main: 0, side: [] };
+
+        return Array.from(winnersMap.values()).map(w => ({
+            playerId: w.player.socketId,
+            playerName: w.player.name,
+            hand: [...w.player.hand!],  // 深いコピー
+            handRank: w.handRank,
+            amount: w.amount
+        }));
+    }
+
+    /**
+     * サイドポット対応のポット分配
+     * 各ポットごとに参加資格のあるプレイヤーの中から勝者を決定
+     */
+    private distributeToWinnersWithSidePots(
+        room: Room,
+        allEvaluations: { player: Player; bestFive: Card[]; handRank: string }[],
+        compareFunc: (a: Card[], b: Card[]) => number
+    ): ShowdownResult['winners'] {
+        const winnersMap = new Map<string, { player: Player; handRank: string; amount: number }>();
+
+        // 全参加者のソケットID（メインポット資格者）
+        const allPlayerIds = allEvaluations.map(e => e.player.socketId);
+
+        // メインポットの分配
+        if (room.gameState.pot.main > 0) {
+            // 全員の中から最強のハンドを見つける
+            let bestEval = allEvaluations[0];
+            for (const e of allEvaluations) {
+                if (compareFunc(e.bestFive, bestEval.bestFive) > 0) {
+                    bestEval = e;
+                }
+            }
+
+            // 同着勝者を見つける
+            const mainWinners = allEvaluations.filter(e =>
+                compareFunc(e.bestFive, bestEval.bestFive) === 0
+            );
+
+            const share = Math.floor(room.gameState.pot.main / mainWinners.length);
+            const remainder = room.gameState.pot.main % mainWinners.length;
+
+            mainWinners.forEach((w, i) => {
+                const amount = share + (i < remainder ? 1 : 0);
+                w.player.stack += amount;
+
+                winnersMap.set(w.player.socketId, {
+                    player: w.player,
+                    handRank: w.handRank,
+                    amount
+                });
+            });
+        }
+
+        // サイドポットの分配
+        for (const sidePot of room.gameState.pot.side) {
+            if (sidePot.amount <= 0) continue;
+
+            // このサイドポットに参加資格のあるプレイヤーの評価のみ
+            const eligibleEvaluations = allEvaluations.filter(e =>
+                sidePot.eligiblePlayers.includes(e.player.socketId)
+            );
+
+            if (eligibleEvaluations.length === 0) continue;
+
+            // 参加資格者の中から最強のハンドを見つける
+            let bestEval = eligibleEvaluations[0];
+            for (const e of eligibleEvaluations) {
+                if (compareFunc(e.bestFive, bestEval.bestFive) > 0) {
+                    bestEval = e;
+                }
+            }
+
+            // 同着勝者を見つける
+            const sideWinners = eligibleEvaluations.filter(e =>
+                compareFunc(e.bestFive, bestEval.bestFive) === 0
+            );
+
+            const share = Math.floor(sidePot.amount / sideWinners.length);
+            const remainder = sidePot.amount % sideWinners.length;
+
+            sideWinners.forEach((w, i) => {
+                const amount = share + (i < remainder ? 1 : 0);
+                w.player.stack += amount;
+
+                const existing = winnersMap.get(w.player.socketId);
+                if (existing) {
+                    existing.amount += amount;
+                } else {
+                    winnersMap.set(w.player.socketId, {
+                        player: w.player,
+                        handRank: w.handRank,
+                        amount
+                    });
+                }
+            });
+        }
+
+        room.gameState.pot = { main: 0, side: [] };
+
+        return Array.from(winnersMap.values()).map(w => ({
+            playerId: w.player.socketId,
+            playerName: w.player.name,
+            hand: [...w.player.hand!],  // 深いコピー
+            handRank: w.handRank,
+            amount: w.amount
+        }));
+    }
+
+    /**
+     * 勝者へのポット分配共通処理（後方互換性のため残す）
+     */
+    private distributeToWinners(room: Room, winningPlayers: any[]): ShowdownResult['winners'] {
+        const totalPot = room.gameState.pot.main +
+            room.gameState.pot.side.reduce((sum, s) => sum + s.amount, 0);
+
+        const share = Math.floor(totalPot / winningPlayers.length);
+        const remainder = totalPot % winningPlayers.length;
+
+        const winners = winningPlayers.map((w, i) => {
+            const amount = share + (i < remainder ? 1 : 0);
+            w.player.stack += amount;
+            return {
+                playerId: w.player.socketId,
+                playerName: w.player.name,
+                hand: [...w.player.hand!],  // 深いコピー
+                handRank: w.handRank,
+                amount
+            };
+        });
+
+        room.gameState.pot = { main: 0, side: [] };
+        return winners;
+    }
+
+    /**
      * 1人を除いて全員フォールドした場合の処理
+     * 不戦勝のため、勝者のハンドは表示しない（Muck扱い）
      */
     awardToLastPlayer(room: Room): ShowdownResult {
         const lastPlayer = room.players.find(p =>
@@ -206,11 +981,13 @@ export class ShowdownManager {
 
         console.log(`🏆 ${lastPlayer.name} wins ${totalPot} (others folded)`);
 
+        // 不戦勝: 勝者のハンドは表示しない（hand: null）
+        // ポーカールール: ショーダウンに進んでいないため、ハンドを見せる義務はない
         return {
             winners: [{
                 playerId: lastPlayer.socketId,
                 playerName: lastPlayer.name,
-                hand: lastPlayer.hand || [],
+                hand: [],  // 空配列 = ハンド非表示
                 handRank: 'Uncontested',
                 amount: totalPot
             }],

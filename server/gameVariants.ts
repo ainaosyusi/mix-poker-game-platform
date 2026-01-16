@@ -12,6 +12,7 @@ export interface GameVariantConfig {
     hasButton: boolean;            // スタッドはボタンなし
     hasDrawPhase: boolean;         // ドローポーカーの交換フェーズ
     handEvaluatorType: 'high' | 'low' | 'high-low' | 'razz';
+    handEvaluation: 'high' | 'highlow' | 'razz' | 'badugi' | '2-7'; // ショーダウン評価タイプ
     maxDrawCount?: number;         // ドロー交換の最大枚数
     streets: string[];             // ストリート名
 }
@@ -28,6 +29,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasButton: true,
         hasDrawPhase: false,
         handEvaluatorType: 'high',
+        handEvaluation: 'high',
         streets: ['Preflop', 'Flop', 'Turn', 'River']
     },
 
@@ -41,6 +43,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasButton: true,
         hasDrawPhase: false,
         handEvaluatorType: 'high',
+        handEvaluation: 'high',
         streets: ['Preflop', 'Flop', 'Turn', 'River']
     },
 
@@ -54,6 +57,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasButton: true,
         hasDrawPhase: false,
         handEvaluatorType: 'high-low',
+        handEvaluation: 'highlow',
         streets: ['Preflop', 'Flop', 'Turn', 'River']
     },
 
@@ -67,6 +71,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasButton: true,
         hasDrawPhase: true,
         handEvaluatorType: 'low',
+        handEvaluation: '2-7',
         maxDrawCount: 5,
         streets: ['Pre-Draw', 'First Draw', 'Second Draw', 'Third Draw']
     },
@@ -81,6 +86,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasButton: false,
         hasDrawPhase: false,
         handEvaluatorType: 'high',
+        handEvaluation: 'high',
         streets: ['3rd Street', '4th Street', '5th Street', '6th Street', '7th Street']
     },
 
@@ -94,6 +100,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasButton: false,
         hasDrawPhase: false,
         handEvaluatorType: 'high-low',
+        handEvaluation: 'highlow',
         streets: ['3rd Street', '4th Street', '5th Street', '6th Street', '7th Street']
     },
 
@@ -107,6 +114,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasButton: false,
         hasDrawPhase: false,
         handEvaluatorType: 'razz',
+        handEvaluation: 'razz',
         streets: ['3rd Street', '4th Street', '5th Street', '6th Street', '7th Street']
     },
 
@@ -119,7 +127,8 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         betStructure: 'fixed',
         hasButton: true,
         hasDrawPhase: true,
-        handEvaluatorType: 'low', // Special badugi rules
+        handEvaluatorType: 'low',
+        handEvaluation: 'badugi',
         maxDrawCount: 4,
         streets: ['Pre-Draw', 'First Draw', 'Second Draw', 'Third Draw']
     }

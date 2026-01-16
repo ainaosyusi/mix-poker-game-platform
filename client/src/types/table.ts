@@ -11,6 +11,7 @@ export interface Player {
   totalBet: number;
   status: 'ACTIVE' | 'FOLDED' | 'ALL_IN' | 'SIT_OUT';
   hand?: string[] | null;
+  studUpCards?: string[];  // Stud games: public up cards
 }
 
 // ゲーム状態
@@ -37,6 +38,13 @@ export interface RoomConfig {
   allowedGames?: string[];
 }
 
+// ローテーション状態
+export interface RotationState {
+  orbitCount: number;
+  gamesList: string[];
+  currentGameIndex: number;
+}
+
 // 部屋情報
 export interface Room {
   id: string;
@@ -45,6 +53,8 @@ export interface Room {
   gameState: GameState;
   dealerBtnIndex: number;
   activePlayerIndex: number;
+  streetStarterIndex: number;
+  rotation: RotationState;
 }
 
 // アクションタイプ
@@ -112,9 +122,12 @@ export interface PlayerSeatProps {
 export interface CardProps {
   card: string;
   animate?: boolean;
-  size?: 'small' | 'medium' | 'large';
+  size?: 'tiny' | 'small' | 'medium' | 'large';
   faceDown?: boolean;
 }
+
+// ベッティング構造タイプ
+export type BetStructure = 'no-limit' | 'pot-limit' | 'fixed';
 
 // ActionPanelProps
 export interface ActionPanelProps {
@@ -125,4 +138,9 @@ export interface ActionPanelProps {
   yourBet: number;
   pot: number;
   onAction: (type: ActionType, amount?: number) => void;
+  // ベッティング構造情報
+  betStructure?: BetStructure;
+  isCapped?: boolean;
+  raisesRemaining?: number;
+  fixedBetSize?: number;
 }

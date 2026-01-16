@@ -3,6 +3,9 @@ import { io, Socket } from 'socket.io-client';
 import { Lobby } from './Lobby';
 import { Table } from './Table';
 
+// アプリバージョン
+const APP_VERSION = 'v0.3.3';
+
 function App() {
   // Phase 3-A: Routing State
   const [currentView, setCurrentView] = useState<'name' | 'lobby' | 'table'>('name');
@@ -57,52 +60,27 @@ function App() {
   // 名前入力画面
   if (currentView === 'name') {
     return (
-      <div style={{
-        padding: '40px',
-        textAlign: 'center',
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        background: '#1a1a1a',
-        color: 'white'
-      }}>
-        <h1 style={{ marginBottom: '20px', color: '#ffcc00' }}>🎰 Mix Poker Game Platform</h1>
-        <h2 style={{ marginBottom: '30px', color: '#bbb' }}>Phase 3-A: Room Management</h2>
-        <div style={{ maxWidth: '400px', margin: '0 auto' }}>
+      <div className="name-input-page">
+        <div className="name-input-card">
+          <div className="name-input-icon">🎰</div>
+          <h1 className="name-input-title">Mix Poker</h1>
+          <p className="name-input-subtitle">テキサスホールデムからミックスゲームまで</p>
           <input
             type="text"
-            placeholder="あなたの名前を入力..."
+            className="name-input-field"
+            placeholder="プレイヤー名を入力..."
             value={playerName}
             onChange={(e) => setPlayerName(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSetName()}
-            style={{
-              padding: '12px',
-              fontSize: '16px',
-              width: '100%',
-              marginBottom: '15px',
-              background: '#2d2d2d',
-              color: 'white',
-              border: '1px solid #555',
-              borderRadius: '4px'
-            }}
           />
           <button
+            className="name-input-btn"
             onClick={handleSetName}
             disabled={!playerName.trim()}
-            style={{
-              padding: '12px 24px',
-              fontSize: '16px',
-              background: playerName.trim() ? '#4CAF50' : '#555',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: playerName.trim() ? 'pointer' : 'not-allowed',
-              width: '100%'
-            }}
           >
             ロビーに入る
           </button>
+          <div className="version-info">{APP_VERSION}</div>
         </div>
       </div>
     );
@@ -111,35 +89,23 @@ function App() {
   // ロビー画面
   if (currentView === 'lobby') {
     return (
-      <div style={{
-        minHeight: '100vh',
-        background: '#1a1a1a',
-        color: 'white'
-      }}>
-        <Lobby
-          socket={socketRef.current}
-          playerName={playerName}
-          onJoinRoom={handleJoinRoom}
-        />
-      </div>
+      <Lobby
+        socket={socketRef.current}
+        playerName={playerName}
+        onJoinRoom={handleJoinRoom}
+      />
     );
   }
 
   // テーブル画面
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#1a1a1a',
-      color: 'white'
-    }}>
-      <Table
-        socket={socketRef.current}
-        roomId={currentRoomId || ''}
-        initialRoomData={initialRoomData}
-        yourSocketId={myId}
-        onLeaveRoom={handleLeaveRoom}
-      />
-    </div>
+    <Table
+      socket={socketRef.current}
+      roomId={currentRoomId || ''}
+      initialRoomData={initialRoomData}
+      yourSocketId={myId}
+      onLeaveRoom={handleLeaveRoom}
+    />
   );
 }
 

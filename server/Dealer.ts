@@ -246,6 +246,92 @@ export class Dealer {
     }
 
     /**
+     * カードのランク値を取得（Bring-In判定用）
+     */
+    private getCardRankValue(card: string): number {
+        const rank = card[0];
+        const values: { [key: string]: number } = {
+            '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'T': 10,
+            'J': 11, 'Q': 12, 'K': 13, 'A': 14
+        };
+        return values[rank] || 0;
+    }
+
+    /**
+     * カードのスート値を取得（タイブレーク用: ♣ < ♦ < ♥ < ♠）
+     */
+    private getCardSuitValue(card: string): number {
+        const suit = card[1];
+        const values: { [key: string]: number } = {
+            '♣': 1, '♦': 2, '♥': 3, '♠': 4
+        };
+        return values[suit] || 0;
+    }
+
+    /**
+     * Stud Bring-In判定: 最も弱いアップカードを持つプレイヤーのインデックスを返す
+     * @param players プレイヤー配列
+     * @param isRazz Razzの場合は最も強いアップカード
+     * @returns プレイヤーのインデックス
+     */
+    determineBringIn(players: (Player | null)[], isRazz: boolean = false): number {
+        let bringInIndex = -1;
+        let targetRank = isRazz ? 0 : 15; // Razz: 高い方、通常: 低い方
+        let targetSuit = isRazz ? 0 : 5;
+
+        for (let i = 0; i < players.length; i++) {
+            const player = players[i];
+            if (!player || !player.studUpCards || player.studUpCards.length === 0) continue;
+
+            const upCard = player.studUpCards[0]; // 3rd Streetの最初のアップカード
+            const rank = this.getCardRankValue(upCard);
+            const suit = this.getCardSuitValue(upCard);
+
+            if (isRazz) {
+                // Razz: 最も高いカード（強い＝悪い）がBring-In
+                if (rank > targetRank || (rank === targetRank && suit > targetSuit)) {
+                    targetRank = rank;
+                    targetSuit = suit;
+                    bringInIndex = i;
+                }
+            } else {
+                // 通常Stud: 最も低いカードがBring-In
+                if (rank < targetRank || (rank === targetRank && suit < targetSuit)) {
+                    targetRank = rank;
+                    targetSuit = suit;
+                    bringInIndex = i;
+                }
+            }
+        }
+
+        return bringInIndex;
+    }
+
+    /**
+     * Bring-Inを徴収
+     * @param room 部屋
+     * @param bringInIndex Bring-Inプレイヤーのインデックス
+     * @param bringInAmount Bring-In額（通常はSBの半分程度）
+     */
+    collectBringIn(room: Room, bringInIndex: number, bringInAmount: number): void {
+        const player = room.players[bringInIndex];
+        if (!player) return;
+
+        const amount = Math.min(player.stack, bringInAmount);
+        player.stack -= amount;
+        player.bet = amount;
+        player.totalBet = amount;
+        room.gameState.pot.main += amount;
+        room.gameState.currentBet = amount;
+
+        if (player.stack === 0) {
+            player.status = 'ALL_IN';
+        }
+
+        console.log(`💰 Bring-In: ${player.name} posts ${amount}`);
+    }
+
+    /**
      * スタッド用カード配布（3rd Street: 2 down + 1 up）
      */
     dealStudInitial(deck: string[], players: (Player | null)[]): void {

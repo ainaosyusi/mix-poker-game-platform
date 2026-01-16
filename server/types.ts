@@ -9,9 +9,11 @@ export interface RoomConfig {
     maxPlayers: number;        // 最大プレイヤー数（現在は6固定、将来8に拡張可能）
     smallBlind: number;        // スモールブラインド
     bigBlind: number;          // ビッグブラインド
-    buyInMin: number;          // 最小バイイン
-    buyInMax: number;          // 最大バイイン
-    allowedGames: string[];    // 許可されたゲーム一覧 ["NLH", "PLO", "2-7_TD", ...]
+    buyInMin?: number;         // 最小バイイン
+    buyInMax?: number;         // 最大バイイン
+    allowedGames?: string[];   // 許可されたゲーム一覧 ["NLH", "PLO", "2-7_TD", ...]
+    timeLimit?: number;        // アクションタイムアウト（秒）
+    studAnte?: number;         // Studゲームのアンティ（デフォルト: BB/5）
 }
 
 // ========== Pot State ==========
@@ -49,9 +51,11 @@ export interface Player {
 export type GameStatus = 'WAITING' | 'PLAYING' | 'PAUSED';
 
 export interface GameState {
-    status: GameStatus | 'PREFLOP' | 'FLOP' | 'TURN' | 'RIVER' | 'SHOWDOWN';
+    status: GameStatus | GamePhase;
     gameVariant: string;       // 現在のゲーム (例: "NLH", "PLO_OCEAN")
-    street: number;            // 0:Pre, 1:Flop, 2:Turn, 3:River, 4:Showdown
+    street: number;            // Hold'em: 0:Pre, 1:Flop, 2:Turn, 3:River, 4:Showdown
+                               // Stud: 0:3rd, 1:4th, 2:5th, 3:6th, 4:7th, 5:Showdown
+                               // Draw: 0:Pre, 1:1st Draw, 2:2nd Draw, 3:3rd Draw, 4:Showdown
     pot: PotState;             // ポットの状態
     board: string[];           // コミュニティカード
     deckStatus: {              // リシャッフル判定用
@@ -62,14 +66,25 @@ export interface GameState {
     currentBet: number;        // 現在のベット額
     minRaise: number;          // 最小レイズ額
     handNumber: number;        // ハンド番号
+    // ベッティング構造用
+    raisesThisRound: number;   // このラウンドでのレイズ回数（Fixed-Limit Cap用）
+    deck: string[];            // デッキ（サーバー内部用）
+    // Draw ゲーム用
+    isDrawPhase?: boolean;     // true = ドロー交換フェーズ（ベッティングではない）
+    playersCompletedDraw?: string[];  // ドロー交換完了したプレイヤーのsocketId
+    // All-In Runout用
+    isRunout?: boolean;        // true = オールインランアウト中
+    runoutPhase?: string;      // ランアウト開始時のフェーズ
 }
 
 // ========== Rotation Management ==========
 
 export interface RotationState {
-    orbitCount: number;        // 現在の周回数
+    enabled: boolean;          // ローテーションが有効か
     gamesList: string[];       // ローテーション予定リスト
     currentGameIndex: number;  // リストのどこにいるか
+    handsPerGame: number;      // 1ゲームあたりのハンド数（通常は8=1周）
+    orbitCount?: number;       // 現在の周回数
 }
 
 // ========== Meta Game ==========
@@ -96,6 +111,8 @@ export interface Room {
     players: (Player | null)[];         // 長さ6の配列（nullは空席）
     dealerBtnIndex: number;             // ボタンの位置
     activePlayerIndex: number;          // 現在アクション待ちのプレイヤー（-1は誰も待っていない）
+    streetStarterIndex: number;         // 現在のストリートで最初にアクションしたプレイヤー
+    lastAggressorIndex: number;         // 最後にベット/レイズしたプレイヤー（ショーダウン順序用）
 
     // ローテーション管理
     rotation: RotationState;
@@ -175,10 +192,22 @@ export type ActionType = 'FOLD' | 'CHECK' | 'CALL' | 'BET' | 'RAISE' | 'ALL_IN';
 // ゲームフェーズ
 export type GamePhase =
     | 'WAITING'      // ゲーム開始待ち（2人以上着席が必要）
+    // Hold'em/Omaha フェーズ
     | 'PREFLOP'      // プリフロップ
     | 'FLOP'         // フロップ
     | 'TURN'         // ターン
     | 'RIVER'        // リバー
+    // Stud フェーズ
+    | 'THIRD_STREET'   // 3rd Street (2 down + 1 up)
+    | 'FOURTH_STREET'  // 4th Street (1 up)
+    | 'FIFTH_STREET'   // 5th Street (1 up)
+    | 'SIXTH_STREET'   // 6th Street (1 up)
+    | 'SEVENTH_STREET' // 7th Street (1 down)
+    // Draw フェーズ
+    | 'PREDRAW'        // Pre-Draw (初期配布後、最初のベッティング)
+    | 'FIRST_DRAW'     // 1st Draw
+    | 'SECOND_DRAW'    // 2nd Draw
+    | 'THIRD_DRAW'     // 3rd Draw
     | 'SHOWDOWN';    // ショーダウン
 
 // プレイヤーアクション

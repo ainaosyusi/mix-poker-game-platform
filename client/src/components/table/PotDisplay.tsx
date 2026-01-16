@@ -30,8 +30,8 @@ export const PotDisplay = memo(function PotDisplay({
       <div className="pot-chips">
         <div className="chip-pile">
           <div className="chip chip-green" />
-          <div className="chip chip-blue" style={{ marginTop: '-6px' }} />
-          <div className="chip chip-red" style={{ marginTop: '-6px' }} />
+          <div className="chip chip-blue" />
+          <div className="chip chip-red" />
         </div>
       </div>
 

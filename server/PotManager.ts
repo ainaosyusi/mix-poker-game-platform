@@ -13,37 +13,44 @@ export class PotManager {
      * @returns PotState
      */
     calculatePots(players: (Player | null)[]): PotState {
-        // アクティブなプレイヤー（FOLDED以外）のみ対象
-        const activePlayers = players.filter(p =>
+        // ベットしたプレイヤー全員（フォールドも含む）の貢献額を計算対象
+        const allContributors = players.filter(p =>
+            p !== null && p.totalBet > 0
+        ) as Player[];
+
+        // ショーダウンに残ったプレイヤー（勝者候補）
+        const eligiblePlayers = players.filter(p =>
             p !== null &&
             p.status !== 'FOLDED' &&
             p.totalBet > 0
         ) as Player[];
 
-        if (activePlayers.length === 0) {
+        if (allContributors.length === 0) {
             return { main: 0, side: [] };
         }
 
-        // totalBetでソート（昇順）
-        const sorted = [...activePlayers].sort((a, b) => a.totalBet - b.totalBet);
+        // 全ての異なるベットレベルを取得（昇順）
+        const betLevels = [...new Set(allContributors.map(p => p.totalBet))].sort((a, b) => a - b);
 
         const pots: { amount: number; eligible: string[] }[] = [];
         let prevBet = 0;
 
-        for (const player of sorted) {
-            const bet = player.totalBet;
+        for (const betLevel of betLevels) {
+            if (betLevel > prevBet) {
+                // このレベルに貢献したプレイヤーの数
+                const contributorsAtLevel = allContributors.filter(p => p.totalBet >= betLevel).length;
 
-            if (bet > prevBet) {
-                // このレベルのポットに貢献できるプレイヤー
-                const eligible = activePlayers
-                    .filter(p => p.totalBet >= bet)
+                // このレベルで勝つ資格のあるプレイヤー（フォールドしていない）
+                const eligible = eligiblePlayers
+                    .filter(p => p.totalBet >= betLevel)
                     .map(p => p.socketId);
 
-                // このレベルのポット額
-                const contribution = bet - prevBet;
-                const potAmount = contribution * activePlayers.filter(p => p.totalBet >= bet).length;
+                // このレベルのポット額 = (このレベル - 前のレベル) * 貢献者数
+                const contribution = betLevel - prevBet;
+                const potAmount = contribution * contributorsAtLevel;
 
                 // すでに存在するポットを更新するか、新規作成
+                // 同じeligibleプレイヤーを持つポットがあれば統合
                 const existingPot = pots.find(p =>
                     p.eligible.length === eligible.length &&
                     p.eligible.every(id => eligible.includes(id))
@@ -51,17 +58,21 @@ export class PotManager {
 
                 if (existingPot) {
                     existingPot.amount += potAmount;
-                } else {
+                } else if (eligible.length > 0) {
+                    // 勝者候補がいる場合のみポットを作成
                     pots.push({ amount: potAmount, eligible });
                 }
+                // eligible.length === 0 の場合: 全員フォールドした場合は最後の残りプレイヤーに全額
 
-                prevBet = bet;
+                prevBet = betLevel;
             }
         }
 
         // 最初のポットをメインポット、残りをサイドポット
         if (pots.length === 0) {
-            return { main: 0, side: [] };
+            // 全員フォールドした場合、残りのベット額を合算
+            const totalBets = allContributors.reduce((sum, p) => sum + p.totalBet, 0);
+            return { main: totalBets, side: [] };
         }
 
         const main = pots[0].amount;

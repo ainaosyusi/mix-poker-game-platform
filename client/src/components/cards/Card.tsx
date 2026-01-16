@@ -37,7 +37,8 @@ function parseCard(card: string): { rank: string; suit: string } {
 }
 
 // サイズのスタイル
-const CARD_SIZES = {
+const CARD_SIZES: Record<string, { width: number; height: number; fontSize: number; suitSize: number }> = {
+  tiny: { width: 28, height: 39, fontSize: 10, suitSize: 8 },
   small: { width: 45, height: 63, fontSize: 14, suitSize: 12 },
   medium: { width: 60, height: 84, fontSize: 18, suitSize: 16 },
   large: { width: 75, height: 105, fontSize: 22, suitSize: 20 },

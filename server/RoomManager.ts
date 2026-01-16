@@ -21,21 +21,27 @@ export class RoomManager {
      * 新しい部屋を作成する
      * @param hostId Private卓の場合はホストのsocketId、Open卓の場合はundefined
      * @param config 部屋の設定
-     * @param customRoomId Private卓の場合、指定したいカスタムID（6桁数字）
+     * @param customRoomId Private卓の場合、指定したいカスタムID（6桁数字）。未指定ならランダム
      * @returns 作成されたRoom
      */
     createRoom(hostId: string | undefined, config: RoomConfig, customRoomId?: string): Room {
         let roomId: string;
 
-        if (customRoomId) {
-            // Private卓: カスタムIDを使用
-            if (!/^\d{6}$/.test(customRoomId)) {
-                throw new Error('Room ID must be exactly 6 digits');
+        if (hostId) {
+            // Private卓
+            if (customRoomId) {
+                // カスタムIDを使用
+                if (!/^\d{6}$/.test(customRoomId)) {
+                    throw new Error('Room ID must be exactly 6 digits');
+                }
+                if (this.rooms.has(customRoomId)) {
+                    throw new Error('Room ID already exists');
+                }
+                roomId = customRoomId;
+            } else {
+                // Private卓でも部屋番号未指定ならランダム生成
+                roomId = this.generateRoomId();
             }
-            if (this.rooms.has(customRoomId)) {
-                throw new Error('Room ID already exists');
-            }
-            roomId = customRoomId;
         } else {
             // Open卓: ランダムIDを生成
             roomId = this.generateRoomId();
@@ -49,6 +55,8 @@ export class RoomManager {
             players: Array(config.maxPlayers).fill(null),
             dealerBtnIndex: 0,
             activePlayerIndex: -1, // -1は誰もアクション待ちでない
+            streetStarterIndex: -1, // 各ストリートで最初にアクションするプレイヤー
+            lastAggressorIndex: -1, // 最後にベット/レイズしたプレイヤー
             rotation: this.createInitialRotation(config),
             metaGame: this.createInitialMetaGame(),
             createdAt: Date.now()
@@ -82,18 +90,49 @@ export class RoomManager {
     }
 
     /**
-     * すべての部屋のリストを取得（ロビー用）
+     * 空の部屋を削除（クリーンアップ）
+     * @returns 削除された部屋数
+     */
+    cleanupEmptyRooms(): number {
+        let deletedCount = 0;
+        for (const [roomId, room] of this.rooms) {
+            const playerCount = room.players.filter(p => p !== null).length;
+            if (playerCount === 0) {
+                this.rooms.delete(roomId);
+                console.log(`🧹 Empty room cleaned up: ${roomId}`);
+                deletedCount++;
+            }
+        }
+        return deletedCount;
+    }
+
+    /**
+     * オープン部屋のリストのみを取得（ロビー用）
+     * プライベート部屋は非表示
+     * 注: 空の部屋は standUp() 時に自動削除される
      * @returns RoomListItem配列
      */
     getAllRooms(): RoomListItem[] {
-        return Array.from(this.rooms.values()).map(room => ({
-            id: room.id,
-            playerCount: room.players.filter(p => p !== null).length,
-            maxPlayers: room.config.maxPlayers,
-            gameVariant: room.gameState.gameVariant,
-            blinds: `${room.config.smallBlind}/${room.config.bigBlind}`,
-            isPrivate: room.hostId !== undefined
-        }));
+        return Array.from(this.rooms.values())
+            .filter(room => room.hostId === undefined) // Open部屋のみ
+            .map(room => ({
+                id: room.id,
+                playerCount: room.players.filter(p => p !== null).length,
+                maxPlayers: room.config.maxPlayers,
+                gameVariant: room.gameState.gameVariant,
+                blinds: `${room.config.smallBlind}/${room.config.bigBlind}`,
+                isPrivate: false
+            }));
+    }
+
+    /**
+     * 部屋がプライベートかどうかを確認
+     * @param roomId 部屋ID
+     * @returns Private部屋ならtrue
+     */
+    isPrivateRoom(roomId: string): boolean {
+        const room = this.rooms.get(roomId);
+        return room ? room.hostId !== undefined : false;
     }
 
     /**
@@ -172,7 +211,7 @@ export class RoomManager {
     private createInitialGameState(config: RoomConfig): GameState {
         return {
             status: 'WAITING',
-            gameVariant: config.allowedGames[0] || 'NLH',
+            gameVariant: config.allowedGames?.[0] || 'NLH',
             street: 0,
             pot: { main: 0, side: [] },
             board: [],
@@ -182,7 +221,9 @@ export class RoomManager {
             },
             currentBet: 0,
             minRaise: config.bigBlind,
-            handNumber: 0
+            handNumber: 0,
+            raisesThisRound: 0,
+            deck: []
         };
     }
 
@@ -191,9 +232,11 @@ export class RoomManager {
      */
     private createInitialRotation(config: RoomConfig): RotationState {
         return {
-            orbitCount: 0,
-            gamesList: config.allowedGames,
-            currentGameIndex: 0
+            enabled: false,
+            gamesList: config.allowedGames || ['NLH'],
+            currentGameIndex: 0,
+            handsPerGame: 8,
+            orbitCount: 0
         };
     }
 

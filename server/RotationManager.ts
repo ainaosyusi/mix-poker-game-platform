@@ -41,7 +41,7 @@ export class RotationManager {
 
             // 周回数を更新（全ゲームを回った場合）
             if (nextIndex === 0) {
-                room.rotation.orbitCount++;
+                room.rotation.orbitCount = (room.rotation.orbitCount || 0) + 1;
             }
 
             console.log(`🔄 Game rotation: ${room.gameState.gameVariant} -> ${nextGame} (Orbit: ${room.rotation.orbitCount})`);
@@ -120,7 +120,7 @@ export class RotationManager {
             totalGames: room.rotation.gamesList.length,
             remainingHands: this.getRemainingHands(room),
             nextGame: this.getNextGame(room),
-            orbitCount: room.rotation.orbitCount
+            orbitCount: room.rotation.orbitCount || 0
         };
     }
 }

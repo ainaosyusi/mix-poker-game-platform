@@ -130,7 +130,9 @@ export class ActionValidator {
             actions.push('RAISE');
         }
 
-        // ALL_IN: スタックがあれば常に可能
+        // ALL_IN: No-Limitのみ（スタックがあれば可能）
+        // Note: この関数は旧バージョン互換のため残していますが、
+        // GameEngine.getValidActionsの方を優先して使用してください
         if (stack > 0) {
             actions.push('ALL_IN');
         }

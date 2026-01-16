@@ -8,6 +8,9 @@ import { Socket } from 'socket.io-client';
 import { PokerTable } from './components/table/PokerTable';
 import { ActionPanel } from './components/action/ActionPanel';
 import { Card, HoleCards } from './components/cards/Card';
+import { GameLog, createActionLog, createEventLog } from './components/log/GameLog';
+import type { LogEntry } from './components/log/GameLog';
+import { evaluateHandRank } from './handEvaluator';
 import type {
   Player,
   GameState,
@@ -15,6 +18,22 @@ import type {
   ActionType,
   ShowdownResult,
 } from './types/table';
+
+// ゲームバリアントの表示名マッピング
+const GAME_VARIANT_NAMES: Record<string, string> = {
+  NLH: "No Limit Hold'em",
+  PLO: 'Pot Limit Omaha',
+  PLO8: 'PLO Hi-Lo',
+  '2-7_TD': '2-7 Triple Draw',
+  '7CS': '7 Card Stud',
+  '7CS8': '7 Card Stud Hi-Lo',
+  RAZZ: 'Razz',
+  BADUGI: 'Badugi',
+};
+
+function getGameVariantFullName(variantId: string): string {
+  return GAME_VARIANT_NAMES[variantId] || variantId;
+}
 
 interface TableProps {
   socket: Socket | null;
@@ -38,7 +57,45 @@ export function Table({
   const [isYourTurn, setIsYourTurn] = useState(false);
   const [validActions, setValidActions] = useState<ActionType[]>([]);
   const [showdownResult, setShowdownResult] = useState<ShowdownResult | null>(null);
-  const [currentBetInfo, setCurrentBetInfo] = useState({ currentBet: 0, minRaise: 0 });
+  const [currentBetInfo, setCurrentBetInfo] = useState({
+    currentBet: 0,
+    minRaise: 0,
+    maxBet: 0,
+    betStructure: 'no-limit' as 'no-limit' | 'pot-limit' | 'fixed',
+    isCapped: false,
+    raisesRemaining: 4,
+    fixedBetSize: undefined as number | undefined,
+  });
+  const [gameLogs, setGameLogs] = useState<LogEntry[]>([]);
+  const [isLogCollapsed, setIsLogCollapsed] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [rebuyAmount, setRebuyAmount] = useState(500);
+  const [showRebuyDialog, setShowRebuyDialog] = useState(false);
+
+  // Draw game用state
+  const [isDrawPhase, setIsDrawPhase] = useState(false);
+  const [selectedDrawCards, setSelectedDrawCards] = useState<number[]>([]);
+  const [hasDrawnThisRound, setHasDrawnThisRound] = useState(false);
+
+  // ランアウト(オールイン)用state
+  const [isRunout, setIsRunout] = useState(false);
+
+  // ゲーム設定用state
+  const [settingsForm, setSettingsForm] = useState({
+    smallBlind: 5,
+    bigBlind: 10,
+    studAnte: 2, // Studゲームのアンティ/Bring-In
+    selectedVariant: 'NLH',
+    rotationEnabled: false,
+    rotationGames: ['NLH', 'PLO'],
+    handsPerGame: 8,
+    sevenDeuceEnabled: false,
+  });
+
+  // ログを追加するヘルパー
+  const addLog = useCallback((entry: LogEntry) => {
+    setGameLogs(prev => [...prev.slice(-49), entry]); // 最大50件保持
+  }, []);
 
   // Socket.io イベントハンドリング
   useEffect(() => {
@@ -56,22 +113,109 @@ export function Table({
       setRoom(data.room);
       setYourHand(data.yourHand || []);
       setShowdownResult(null);
+      // ハンド開始ログは不要（ユーザー要望）
     });
 
-    socket.on('your-turn', (data: { validActions: ActionType[]; currentBet: number; minRaise: number }) => {
+    socket.on('your-turn', (data: {
+      validActions: ActionType[];
+      currentBet: number;
+      minRaise: number;
+      maxBet?: number;
+      betStructure?: 'no-limit' | 'pot-limit' | 'fixed';
+      isCapped?: boolean;
+      raisesRemaining?: number;
+      fixedBetSize?: number;
+    }) => {
       setIsYourTurn(true);
       setValidActions(data.validActions);
-      setCurrentBetInfo({ currentBet: data.currentBet, minRaise: data.minRaise });
+      setCurrentBetInfo({
+        currentBet: data.currentBet,
+        minRaise: data.minRaise,
+        maxBet: data.maxBet || 10000,
+        betStructure: data.betStructure || 'no-limit',
+        isCapped: data.isCapped || false,
+        raisesRemaining: data.raisesRemaining ?? 4,
+        fixedBetSize: data.fixedBetSize,
+      });
     });
 
     socket.on('showdown-result', (result: ShowdownResult) => {
       setShowdownResult(result);
       setYourHand([]);
       setIsYourTurn(false);
+      // ショーダウンログは不要、勝者のみ表示
+      result.winners.forEach(w => {
+        // 役名と獲得額を表示（カードも小さく表示）
+        addLog(createEventLog(
+          'win',
+          `${w.playerName} が ${w.amount.toLocaleString()} を獲得 (${w.handRank})`,
+          w.hand && w.hand.length > 0 ? w.hand : undefined
+        ));
+      });
     });
 
     socket.on('action-invalid', (data: { reason: string }) => {
       alert(`無効なアクション: ${data.reason}`);
+      // アクションが無効だった場合、再度自分のターンに設定
+      setIsYourTurn(true);
+    });
+
+    // 着席成功時のログ
+    socket.on('sit-down-success', (data: { seatIndex: number }) => {
+      console.log(`✅ Successfully sat down at seat ${data.seatIndex}`);
+      addLog(createEventLog('info', `シート ${data.seatIndex + 1} に着席しました`));
+    });
+
+    // リバイ成功時
+    socket.on('rebuy-success', (data: { amount: number; newStack: number }) => {
+      console.log(`💰 Rebuy successful: +${data.amount} (new stack: ${data.newStack})`);
+      addLog(createEventLog('info', `${data.amount} チップを追加しました (合計: ${data.newStack})`));
+      setShowRebuyDialog(false);
+    });
+
+    // ドロー完了時（自分のカード更新）
+    socket.on('draw-complete', (data: { newHand: string[] }) => {
+      setYourHand(data.newHand);
+      setHasDrawnThisRound(true);
+      setSelectedDrawCards([]);
+    });
+
+    // 他プレイヤーのドロー情報
+    socket.on('player-drew', (data: { playerId: string; playerName: string; cardCount: number }) => {
+      addLog(createEventLog('info', `${data.playerName} が ${data.cardCount} 枚交換`));
+    });
+
+    // オールインランアウト開始
+    socket.on('runout-started', (data: { runoutPhase: string; fullBoard: string[] }) => {
+      console.log(`🎬 All-in runout started from ${data.runoutPhase}`);
+      setIsRunout(true);
+      addLog(createEventLog('info', '⚡ オールイン！ランアウト開始...'));
+    });
+
+    // オールインランアウト中のボード更新
+    socket.on('runout-board', (data: { board: string[]; phase: string }) => {
+      console.log(`🃏 Runout ${data.phase}: ${data.board.join(' ')}`);
+      // room stateを直接更新してボードを表示
+      setRoom(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          gameState: {
+            ...prev.gameState,
+            board: data.board,
+          }
+        };
+      });
+      // フェーズログ
+      if (data.phase === 'FLOP') {
+        addLog(createEventLog('flop', data.board.slice(0, 3).join(' ')));
+      } else if (data.phase === 'TURN') {
+        addLog(createEventLog('turn', data.board[3]));
+      } else if (data.phase === 'RIVER') {
+        addLog(createEventLog('river', data.board[4]));
+        // リバー後にランアウト終了
+        setTimeout(() => setIsRunout(false), 500);
+      }
     });
 
     return () => {
@@ -81,8 +225,34 @@ export function Table({
       socket.off('your-turn');
       socket.off('showdown-result');
       socket.off('action-invalid');
+      socket.off('sit-down-success');
+      socket.off('rebuy-success');
+      socket.off('draw-complete');
+      socket.off('player-drew');
+      socket.off('runout-started');
+      socket.off('runout-board');
     };
   }, [socket]);
+
+  // ドローフェーズ検出
+  useEffect(() => {
+    if (!room) return;
+
+    const gameState = room.gameState as any;
+    const isInDrawPhase = gameState.isDrawPhase === true;
+
+    if (isInDrawPhase && !isDrawPhase) {
+      // ドローフェーズ開始
+      setIsDrawPhase(true);
+      setHasDrawnThisRound(false);
+      setSelectedDrawCards([]);
+    } else if (!isInDrawPhase && isDrawPhase) {
+      // ドローフェーズ終了
+      setIsDrawPhase(false);
+      setHasDrawnThisRound(false);
+      setSelectedDrawCards([]);
+    }
+  }, [room?.gameState]);
 
   // アクション実行
   const handleAction = useCallback((type: ActionType, amount?: number) => {
@@ -90,6 +260,23 @@ export function Table({
     socket.emit('player-action', { type, amount });
     setIsYourTurn(false);
   }, [socket]);
+
+  // ドローカード選択トグル
+  const toggleDrawCard = useCallback((index: number) => {
+    setSelectedDrawCards(prev => {
+      if (prev.includes(index)) {
+        return prev.filter(i => i !== index);
+      } else {
+        return [...prev, index];
+      }
+    });
+  }, []);
+
+  // ドロー実行
+  const handleDraw = useCallback(() => {
+    if (!socket) return;
+    socket.emit('draw-exchange', { discardIndexes: selectedDrawCards });
+  }, [socket, selectedDrawCards]);
 
   // ゲーム開始
   const handleStartGame = useCallback(() => {
@@ -107,13 +294,64 @@ export function Table({
   // 離席
   const handleLeaveRoom = useCallback(() => {
     if (!socket) return;
-    socket.emit('leave-seat');
+    socket.emit('leave-room');
     onLeaveRoom();
   }, [socket, onLeaveRoom]);
+
+  // リバイ
+  const handleRebuy = useCallback(() => {
+    if (!socket || rebuyAmount <= 0) return;
+    socket.emit('rebuy', { amount: rebuyAmount });
+  }, [socket, rebuyAmount]);
 
   // 座席選択
   const handleSeatClick = useCallback((index: number) => {
     setSelectedSeat(prev => prev === index ? null : index);
+  }, []);
+
+  // ゲームバリアント変更
+  const handleChangeVariant = useCallback((variant: string) => {
+    if (!socket) return;
+    socket.emit('set-game-variant', { variant });
+    setSettingsForm(prev => ({ ...prev, selectedVariant: variant }));
+  }, [socket]);
+
+  // ローテーション設定
+  const handleSetRotation = useCallback(() => {
+    if (!socket) return;
+    socket.emit('set-rotation', {
+      enabled: settingsForm.rotationEnabled,
+      gamesList: settingsForm.rotationGames,
+      handsPerGame: settingsForm.handsPerGame
+    });
+  }, [socket, settingsForm]);
+
+  // ブラインド変更
+  const handleUpdateBlinds = useCallback(() => {
+    if (!socket) return;
+    socket.emit('update-room-config', {
+      smallBlind: settingsForm.smallBlind,
+      bigBlind: settingsForm.bigBlind,
+      studAnte: settingsForm.studAnte
+    });
+  }, [socket, settingsForm]);
+
+  // 7-2ゲームトグル
+  const handleToggleSevenDeuce = useCallback(() => {
+    if (!socket) return;
+    const newValue = !settingsForm.sevenDeuceEnabled;
+    socket.emit('toggle-meta-game', { game: 'sevenDeuce', enabled: newValue });
+    setSettingsForm(prev => ({ ...prev, sevenDeuceEnabled: newValue }));
+  }, [socket, settingsForm]);
+
+  // ローテーションゲームリスト切り替え
+  const toggleRotationGame = useCallback((game: string) => {
+    setSettingsForm(prev => {
+      const games = prev.rotationGames.includes(game)
+        ? prev.rotationGames.filter(g => g !== game)
+        : [...prev.rotationGames, game];
+      return { ...prev, rotationGames: games };
+    });
   }, []);
 
   // ローディング中
@@ -137,7 +375,19 @@ export function Table({
   const isSeated = yourSeatIndex !== -1;
   const seatedPlayerCount = room.players.filter(p => p !== null).length;
   const isWaiting = room.gameState.status === 'WAITING';
-  const totalPot = room.gameState.pot.main + room.gameState.pot.side.reduce((sum, s) => sum + s.amount, 0);
+
+  // 確定ポット（現在のラウンドのベットを除く）
+  // 各プレイヤーの現在のベット（player.bet）は手前に表示される
+  // 中央のポットは確定分のみ表示する
+  const currentRoundBets = room.players.reduce((sum, p) => sum + (p?.bet || 0), 0);
+  const totalPotRaw = room.gameState.pot.main + room.gameState.pot.side.reduce((sum, s) => sum + s.amount, 0);
+  // 表示用ポット = 全体ポット - 現在のラウンドのベット合計
+  // ただし、pot.mainには既にcurrentRoundBetsが含まれている
+  // 注: この実装はpot.mainにベットが即座に追加される現在のロジックに対応
+  const displayPot = totalPotRaw - currentRoundBets;
+  // ActionPanel用にはtotalPotを使用（ベット計算用）
+  const totalPot = totalPotRaw;
+
   const yourBet = isSeated ? (room.players[yourSeatIndex]?.bet || 0) : 0;
   const yourStack = isSeated ? (room.players[yourSeatIndex]?.stack || 0) : 0;
   const maxPlayers = (room.config.maxPlayers as 6 | 8) || 6;
@@ -148,14 +398,161 @@ export function Table({
       <header className="table-header">
         <div className="header-left">
           <h1 className="room-title">🎰 Room {roomId}</h1>
-          <p className="room-info">
-            {room.gameState.gameVariant} • {room.config.smallBlind}/{room.config.bigBlind} • Hand #{room.gameState.handNumber}
-          </p>
+          <div className="room-info-row">
+            <span className="blinds-info">{room.config.smallBlind}/{room.config.bigBlind}</span>
+            <span className="hand-info">Hand #{room.gameState.handNumber}</span>
+          </div>
         </div>
+        {/* 現在のゲームバリアント表示 */}
+        <div className="game-variant-display">
+          <span className="game-variant-label">現在のゲーム</span>
+          <span className="game-variant-name">{getGameVariantFullName(room.gameState.gameVariant)}</span>
+          {room.rotation.gamesList.length > 1 && (
+            <span className="rotation-info">
+              ({room.rotation.currentGameIndex + 1}/{room.rotation.gamesList.length})
+            </span>
+          )}
+        </div>
+        <button className="action-btn check" onClick={() => setShowSettings(!showSettings)}>
+          ⚙️ 設定
+        </button>
         <button className="action-btn fold" onClick={handleLeaveRoom}>
           ロビーに戻る
         </button>
       </header>
+
+      {/* ゲーム設定パネル */}
+      {showSettings && (
+        <div className="settings-panel">
+          <div className="settings-header">
+            <h3>⚙️ ゲーム設定</h3>
+            <button className="close-btn" onClick={() => setShowSettings(false)}>✕</button>
+          </div>
+
+          {/* ゲームバリアント選択 */}
+          <div className="settings-section">
+            <h4>🎮 ゲーム選択</h4>
+            <div className="variant-buttons">
+              {Object.entries(GAME_VARIANT_NAMES).map(([id, name]) => (
+                <button
+                  key={id}
+                  className={`variant-btn ${room.gameState.gameVariant === id ? 'active' : ''}`}
+                  onClick={() => handleChangeVariant(id)}
+                  disabled={!isWaiting}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+            {!isWaiting && <p className="settings-hint">※ ゲーム中は変更できません</p>}
+          </div>
+
+          {/* ローテーション設定 */}
+          <div className="settings-section">
+            <h4>🔄 ミックスゲーム (ローテーション)</h4>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={settingsForm.rotationEnabled}
+                onChange={(e) => setSettingsForm(prev => ({ ...prev, rotationEnabled: e.target.checked }))}
+              />
+              ローテーションを有効にする
+            </label>
+
+            {settingsForm.rotationEnabled && (
+              <>
+                <div className="rotation-games">
+                  <p>ローテーションに含めるゲーム:</p>
+                  <div className="game-checkboxes">
+                    {Object.entries(GAME_VARIANT_NAMES).map(([id, name]) => (
+                      <label key={id} className="checkbox-label small">
+                        <input
+                          type="checkbox"
+                          checked={settingsForm.rotationGames.includes(id)}
+                          onChange={() => toggleRotationGame(id)}
+                        />
+                        {name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="hands-per-game">
+                  <label>1ゲームあたりのハンド数:</label>
+                  <select
+                    value={settingsForm.handsPerGame}
+                    onChange={(e) => setSettingsForm(prev => ({ ...prev, handsPerGame: Number(e.target.value) }))}
+                  >
+                    <option value={4}>4ハンド</option>
+                    <option value={6}>6ハンド (半周)</option>
+                    <option value={8}>8ハンド (1周)</option>
+                    <option value={12}>12ハンド (1.5周)</option>
+                    <option value={16}>16ハンド (2周)</option>
+                  </select>
+                </div>
+
+                <button className="action-btn check" onClick={handleSetRotation}>
+                  ローテーション設定を適用
+                </button>
+
+                <div className="rotation-preview">
+                  <p>順序: {settingsForm.rotationGames.join(' → ')}</p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* ブラインド設定 */}
+          <div className="settings-section">
+            <h4>💰 ブラインド設定</h4>
+            <div className="blinds-inputs">
+              <label>
+                SB:
+                <input
+                  type="number"
+                  value={settingsForm.smallBlind}
+                  onChange={(e) => setSettingsForm(prev => ({ ...prev, smallBlind: Number(e.target.value) }))}
+                  min={1}
+                />
+              </label>
+              <label>
+                BB:
+                <input
+                  type="number"
+                  value={settingsForm.bigBlind}
+                  onChange={(e) => setSettingsForm(prev => ({ ...prev, bigBlind: Number(e.target.value) }))}
+                  min={2}
+                />
+              </label>
+              <label title="Studゲームのブリングイン/アンティ額">
+                Ante:
+                <input
+                  type="number"
+                  value={settingsForm.studAnte}
+                  onChange={(e) => setSettingsForm(prev => ({ ...prev, studAnte: Number(e.target.value) }))}
+                  min={1}
+                />
+              </label>
+              <button className="action-btn check" onClick={handleUpdateBlinds} disabled={!isWaiting}>
+                適用
+              </button>
+            </div>
+          </div>
+
+          {/* メタゲーム設定 */}
+          <div className="settings-section">
+            <h4>🎲 サイドゲーム</h4>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={settingsForm.sevenDeuceEnabled}
+                onChange={handleToggleSevenDeuce}
+              />
+              7-2ゲーム (7-2で勝つとボーナス)
+            </label>
+          </div>
+        </div>
+      )}
 
       {/* ポーカーテーブル */}
       <PokerTable
@@ -167,77 +564,171 @@ export function Table({
         yourSocketId={yourSocketId}
         selectedSeat={selectedSeat}
         onSeatClick={handleSeatClick}
+        showdownResult={showdownResult}
+        isRunout={isRunout}
       />
 
-      {/* 自分の手札 */}
-      {yourHand.length > 0 && (
-        <div className="your-hand-area">
-          <span className="hand-label">Your Hand:</span>
-          <HoleCards cards={yourHand} animate size="medium" />
-        </div>
-      )}
+      {/* 自分の手札 (ドローフェーズでない時) */}
+      {yourHand.length > 0 && !isDrawPhase && (() => {
+        // 現在のプレイヤーのstudUpCardsを取得（Stud用）
+        const myPlayer = room.players.find(p => p?.socketId === yourSocketId);
+        const myUpCards = myPlayer?.studUpCards || [];
+        const isStudGame = ['7CS', '7CS8', 'RAZZ'].includes(room.gameState.gameVariant);
 
-      {/* アクションパネル */}
-      {isYourTurn && (
-        <ActionPanel
-          validActions={validActions}
-          currentBet={currentBetInfo.currentBet}
-          minRaise={currentBetInfo.minRaise}
-          maxBet={yourStack}
-          yourBet={yourBet}
-          pot={totalPot}
-          onAction={handleAction}
-        />
-      )}
+        return (
+          <div className="your-hand-area">
+            <span className="hand-label">Your Hand:</span>
+            {isStudGame ? (
+              // Stud: アップカードとダウンカードを区別して表示
+              <div className="hole-cards stud-hand">
+                {yourHand.map((card, i) => {
+                  const isUpCard = myUpCards.includes(card);
+                  return (
+                    <div key={`${card}-${i}`} className={`stud-card-wrapper ${isUpCard ? 'up-card' : 'down-card'}`}>
+                      <Card card={card} size="medium" />
+                      <span className="card-type-indicator">{isUpCard ? '↑' : '↓'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <HoleCards cards={yourHand} animate size="medium" />
+            )}
+            <span className="hand-rank-display">
+              {evaluateHandRank(yourHand, room.gameState.board, room.gameState.gameVariant)}
+            </span>
+          </div>
+        );
+      })()}
 
-      {/* ショーダウン結果 */}
-      {showdownResult && (
-        <div className="showdown-panel">
-          <h2>🏆 SHOWDOWN</h2>
-
-          {/* 勝者 */}
-          <div className="winners-section">
-            <h3 className="text-green">Winners</h3>
-            {showdownResult.winners.map((w, i) => (
-              <div key={i} className="winner-display">
-                <div className="player-name">{w.playerName}</div>
-                <div className="hand-rank">{w.handRank}</div>
-                <div className="cards-row">
-                  {w.hand && w.hand.map((card: string, ci: number) => (
-                    <Card key={ci} card={card} size="small" />
-                  ))}
-                </div>
-                <div className="win-amount">+{w.amount.toLocaleString()} chips</div>
+      {/* ドロー交換パネル */}
+      {yourHand.length > 0 && isDrawPhase && isSeated && (
+        <div className="draw-panel">
+          <div className="draw-header">
+            <span className="draw-title">
+              {hasDrawnThisRound ? '交換完了 - 他のプレイヤーを待っています...' : 'カードを選択して交換'}
+            </span>
+            <span className="hand-rank-display">
+              {evaluateHandRank(yourHand, room.gameState.board, room.gameState.gameVariant)}
+            </span>
+          </div>
+          <div className="draw-cards">
+            {yourHand.map((card, i) => (
+              <div
+                key={i}
+                className={`draw-card-wrapper ${selectedDrawCards.includes(i) ? 'selected' : ''} ${hasDrawnThisRound ? 'disabled' : ''}`}
+                onClick={() => !hasDrawnThisRound && toggleDrawCard(i)}
+              >
+                <Card card={card} size="medium" />
+                {selectedDrawCards.includes(i) && (
+                  <div className="discard-indicator">捨</div>
+                )}
               </div>
             ))}
           </div>
-
-          {/* 他プレイヤー */}
-          {showdownResult.allHands && showdownResult.allHands.length > 0 && (
-            <div className="losers-section">
-              <h4 className="text-gray">Other Players</h4>
-              {showdownResult.allHands
-                .filter((h) => !showdownResult.winners.some((w) => w.playerId === h.playerId))
-                .map((h, i) => (
-                  <div key={i} className="loser-display">
-                    <div className="player-name">{h.playerName}</div>
-                    <div className="cards-row">
-                      {h.hand && h.hand.map((card: string, ci: number) => (
-                        <Card key={ci} card={card} size="small" />
-                      ))}
-                    </div>
-                    {h.handRank && <div className="hand-rank">{h.handRank}</div>}
-                  </div>
-                ))}
+          {!hasDrawnThisRound && (
+            <div className="draw-actions">
+              <button className="draw-button stand-pat" onClick={() => handleDraw()}>
+                スタンドパット (0枚)
+              </button>
+              <button
+                className="draw-button draw-selected"
+                onClick={handleDraw}
+                disabled={selectedDrawCards.length === 0}
+              >
+                {selectedDrawCards.length}枚交換
+              </button>
             </div>
           )}
         </div>
       )}
 
+      {/* アクションパネル - ゲーム中は常時表示 */}
+      {isSeated && !isWaiting && !showdownResult && (
+        <ActionPanel
+          validActions={validActions}
+          currentBet={currentBetInfo.currentBet}
+          minRaise={currentBetInfo.minRaise}
+          maxBet={Math.min(currentBetInfo.maxBet, yourStack + yourBet)}
+          yourBet={yourBet}
+          pot={totalPot}
+          onAction={handleAction}
+          isYourTurn={isYourTurn}
+          betStructure={currentBetInfo.betStructure}
+          isCapped={currentBetInfo.isCapped}
+          raisesRemaining={currentBetInfo.raisesRemaining}
+          fixedBetSize={currentBetInfo.fixedBetSize}
+        />
+      )}
+
+      {/* ショーダウン結果 */}
+      {showdownResult && (() => {
+        // 不戦勝（全員フォールド）かどうかをチェック
+        const isUncontested = showdownResult.winners.length > 0 &&
+          showdownResult.winners.every(w => w.handRank === 'Uncontested');
+
+        return (
+          <div className={`showdown-panel ${isUncontested ? 'uncontested' : ''}`}>
+            {/* 不戦勝の場合はシンプルな表示 */}
+            {isUncontested ? (
+              <h2>🏆 WIN</h2>
+            ) : (
+              <h2>🏆 SHOWDOWN</h2>
+            )}
+
+            {/* 勝者 */}
+            <div className="winners-section">
+              {!isUncontested && <h3 className="text-green">Winners</h3>}
+              {showdownResult.winners.map((w, i) => (
+                <div key={i} className="winner-display">
+                  <div className="player-name">{w.playerName}</div>
+                  {isUncontested ? (
+                    <>
+                      <div className="uncontested-label">相手がフォールド</div>
+                      <div className="win-amount">+{w.amount.toLocaleString()} chips</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="hand-rank">{w.handRank}</div>
+                      <div className="cards-row">
+                        {w.hand && w.hand.length > 0 && w.hand.map((card: string, ci: number) => (
+                          <Card key={ci} card={card} size="small" />
+                        ))}
+                      </div>
+                      <div className="win-amount">+{w.amount.toLocaleString()} chips</div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* 他プレイヤー（不戦勝以外のショーダウン時のみ表示） */}
+            {!isUncontested && showdownResult.allHands && showdownResult.allHands.length > 0 && (
+              <div className="losers-section">
+                <h4 className="text-gray">Other Players</h4>
+                {showdownResult.allHands
+                  .filter((h) => !showdownResult.winners.some((w) => w.playerId === h.playerId))
+                  .map((h, i) => (
+                    <div key={i} className="loser-display">
+                      <div className="player-name">{h.playerName}</div>
+                      <div className="cards-row">
+                        {h.hand && h.hand.map((card: string, ci: number) => (
+                          <Card key={ci} card={card} size="small" />
+                        ))}
+                      </div>
+                      {h.handRank && <div className="hand-rank">{h.handRank}</div>}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* 着席コントロール */}
       {!isSeated && (
         <div className="action-panel seat-panel">
-          <h3>💺 着席する</h3>
+          <h3 className="seat-panel-title">💺 着席する</h3>
           <div className="seat-controls">
             <label className="text-gray">Buy-in:</label>
             <input
@@ -252,7 +743,6 @@ export function Table({
               className="action-btn check"
               onClick={() => selectedSeat !== null && handleSitDown(selectedSeat)}
               disabled={selectedSeat === null}
-              style={{ opacity: selectedSeat === null ? 0.5 : 1 }}
             >
               着席
             </button>
@@ -272,154 +762,55 @@ export function Table({
         </div>
       )}
 
-      {isSeated && isWaiting && seatedPlayerCount < 2 && (
+      {isSeated && isWaiting && seatedPlayerCount < 2 && yourStack > 0 && (
         <div className="waiting-message">
           ゲーム開始には2人以上のプレイヤーが必要です
         </div>
       )}
 
-      {/* 追加スタイル（インライン） */}
-      <style>{`
-        .table-page {
-          padding: 20px;
-          min-height: 100vh;
-        }
+      {/* リバイダイアログ - チップが0の場合 */}
+      {isSeated && isWaiting && yourStack === 0 && (
+        <div className="rebuy-panel">
+          <div className="rebuy-header">
+            <span className="rebuy-icon">💸</span>
+            <h3 className="rebuy-title">チップがありません</h3>
+          </div>
+          <p className="rebuy-message">ゲームを続けるにはチップを追加してください</p>
+          <div className="rebuy-controls">
+            <label className="text-gray">追加額:</label>
+            <input
+              type="number"
+              className="bet-input"
+              value={rebuyAmount}
+              onChange={(e) => setRebuyAmount(Number(e.target.value))}
+              min={room.config.buyInMin}
+              max={room.config.buyInMax}
+            />
+            <button
+              className="action-btn check"
+              onClick={handleRebuy}
+              disabled={rebuyAmount < room.config.buyInMin || rebuyAmount > room.config.buyInMax}
+            >
+              💰 チップ追加
+            </button>
+          </div>
+          <div className="rebuy-options">
+            <button className="action-btn fold small" onClick={handleLeaveRoom}>
+              🚪 退出する
+            </button>
+          </div>
+        </div>
+      )}
 
-        .table-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          max-width: 1000px;
-          margin: 0 auto 30px auto;
-        }
+      {/* ゲームログ */}
+      <GameLog
+        entries={gameLogs}
+        isCollapsed={isLogCollapsed}
+        onToggle={() => setIsLogCollapsed(!isLogCollapsed)}
+      />
 
-        .header-left {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-
-        .room-title {
-          margin: 0;
-          font-size: 28px;
-          color: var(--gold);
-        }
-
-        .room-info {
-          margin: 0;
-          font-size: 14px;
-          color: var(--text-secondary);
-        }
-
-        .table-loading {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          min-height: 100vh;
-          text-align: center;
-        }
-
-        .loading-icon {
-          font-size: 64px;
-          margin-bottom: 20px;
-        }
-
-        .your-hand-area {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          gap: 16px;
-          margin: 30px auto;
-          padding: 20px;
-          background: rgba(59, 130, 246, 0.1);
-          border-radius: 16px;
-          max-width: 400px;
-        }
-
-        .hand-label {
-          color: var(--text-secondary);
-          font-size: 14px;
-        }
-
-        .seat-panel {
-          margin-top: 20px;
-        }
-
-        .seat-panel h3 {
-          margin: 0 0 16px 0;
-          text-align: center;
-        }
-
-        .seat-controls {
-          display: flex;
-          gap: 12px;
-          justify-content: center;
-          align-items: center;
-        }
-
-        .seat-hint {
-          text-align: center;
-          color: var(--text-secondary);
-          font-size: 13px;
-          margin-top: 12px;
-        }
-
-        .start-game-area {
-          text-align: center;
-          margin-top: 30px;
-        }
-
-        .start-btn {
-          font-size: 18px;
-          padding: 18px 48px;
-        }
-
-        .waiting-message {
-          text-align: center;
-          color: var(--text-secondary);
-          padding: 30px;
-        }
-
-        .winners-section {
-          margin-bottom: 24px;
-        }
-
-        .winners-section h3 {
-          margin-bottom: 16px;
-        }
-
-        .losers-section {
-          margin-top: 20px;
-        }
-
-        .losers-section h4 {
-          margin-bottom: 12px;
-          font-size: 14px;
-        }
-
-        .cards-row {
-          display: flex;
-          gap: 8px;
-          justify-content: center;
-          margin: 12px 0;
-        }
-
-        @media (max-width: 768px) {
-          .table-header {
-            flex-direction: column;
-            gap: 16px;
-            text-align: center;
-          }
-
-          .room-title {
-            font-size: 22px;
-          }
-
-          .your-hand-area {
-            padding: 16px;
-          }
-        }
-      `}</style>
+      {/* バージョン表示 */}
+      <div className="version-badge">v0.3.3</div>
     </div>
   );
 }

@@ -37,6 +37,7 @@ export class MetaGameManager {
     /**
      * 7-2で勝った場合の処理
      * 7-2(オフスーツ)でポットを取ったプレイヤーは、テーブルの全員からボーナスを獲得
+     * 注意: NLH(No-Limit Hold'em)でのみ有効
      * @param room 部屋
      * @param winnerId 7-2で勝ったプレイヤーID
      * @param winningHand 勝った手札
@@ -44,6 +45,11 @@ export class MetaGameManager {
      */
     checkSevenDeuce(room: Room, winnerId: string, winningHand: string[]): SevenDeuceResult | null {
         if (!room.metaGame.sevenDeuce) {
+            return null;
+        }
+
+        // 7-2ゲームはNLHのみ適用
+        if (room.gameState.gameVariant !== 'NLH') {
             return null;
         }
 
