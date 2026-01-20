@@ -42,7 +42,9 @@ export class Dealer {
      * @param count 各プレイヤーに配る枚数（デフォルト2）
      */
     dealHoleCards(deck: string[], players: (Player | null)[], count: number = 2): void {
-        const activePlayers = players.filter(p => p !== null && p.stack > 0) as Player[];
+        const activePlayers = players.filter(p =>
+            p !== null && p.stack > 0 && p.status === 'ACTIVE'
+        ) as Player[];
 
         // ラウンドロビン方式で配布
         for (let i = 0; i < count; i++) {
@@ -147,6 +149,31 @@ export class Dealer {
     }
 
     /**
+     * 次のブラインド対象プレイヤーを取得
+     * @param includeWaitingForBB trueの場合、BB待ちも対象に含める
+     */
+    getNextBlindPlayer(room: Room, currentIndex: number, includeWaitingForBB: boolean): number {
+        const maxPlayers = room.config.maxPlayers;
+        let nextIndex = (currentIndex + 1) % maxPlayers;
+        let attempts = 0;
+
+        while (attempts < maxPlayers) {
+            const player = room.players[nextIndex];
+            if (
+                player !== null &&
+                player.stack > 0 &&
+                (player.status === 'ACTIVE' || (includeWaitingForBB && player.waitingForBB))
+            ) {
+                return nextIndex;
+            }
+            nextIndex = (nextIndex + 1) % maxPlayers;
+            attempts++;
+        }
+
+        return -1;
+    }
+
+    /**
      * スモールブラインドとビッグブラインドを徴収
      * @param room 部屋
      * @returns {sbIndex, bbIndex} SBとBBのプレイヤーインデックス
@@ -157,10 +184,14 @@ export class Dealer {
 
         // アクティブなプレイヤー数を数える
         const activePlayers = room.players.filter(p =>
-            p !== null && p.stack > 0
+            p !== null && p.stack > 0 && p.status === 'ACTIVE'
         );
 
-        if (activePlayers.length < 2) {
+        const blindEligible = room.players.filter(p =>
+            p !== null && p.stack > 0 && (p.status === 'ACTIVE' || p.waitingForBB)
+        );
+
+        if (blindEligible.length < 2) {
             throw new Error('Need at least 2 players to collect blinds');
         }
 
@@ -171,12 +202,22 @@ export class Dealer {
 
         if (activePlayers.length === 2) {
             // ヘッズアップ
-            sbIndex = dealerIndex;
-            bbIndex = this.getNextActivePlayer(room, dealerIndex);
+            sbIndex = (room.players[dealerIndex]?.status === 'ACTIVE')
+                ? dealerIndex
+                : this.getNextActivePlayer(room, dealerIndex);
+            bbIndex = this.getNextBlindPlayer(room, sbIndex, true);
+        } else if (activePlayers.length < 2) {
+            sbIndex = (room.players[dealerIndex]?.status === 'ACTIVE')
+                ? dealerIndex
+                : this.getNextActivePlayer(room, dealerIndex);
+            if (sbIndex === -1) {
+                sbIndex = this.getNextBlindPlayer(room, dealerIndex, true);
+            }
+            bbIndex = this.getNextBlindPlayer(room, sbIndex, true);
         } else {
             // 3人以上
             sbIndex = this.getNextActivePlayer(room, dealerIndex);
-            bbIndex = this.getNextActivePlayer(room, sbIndex);
+            bbIndex = this.getNextBlindPlayer(room, sbIndex, true);
         }
 
         // ブラインド徴収
@@ -203,6 +244,13 @@ export class Dealer {
         bbPlayer.bet = bbAmount;
         bbPlayer.totalBet = bbAmount;
         room.gameState.pot.main += bbAmount;
+
+        // BB待ちのプレイヤーはここで参加扱いにする
+        if (bbPlayer.waitingForBB) {
+            bbPlayer.waitingForBB = false;
+            bbPlayer.pendingJoin = false;
+            bbPlayer.status = 'ACTIVE';
+        }
 
         // オールインチェック
         if (sbPlayer.stack === 0) {
@@ -332,10 +380,73 @@ export class Dealer {
     }
 
     /**
+     * Studのアクション開始プレイヤーを決定
+     * - 通常: 最も強いアップカードのプレイヤー
+     * - Razz: 最も弱いアップカードのプレイヤー
+     * タイはディーラーの左から順に優先
+     */
+    getStudActionStartIndex(room: Room, isRazz: boolean = false): number {
+        const candidates = room.players
+            .map((player, index) => ({ player, index }))
+            .filter(p => p.player !== null && p.player.status === 'ACTIVE' && (p.player.studUpCards?.length || 0) > 0);
+
+        if (candidates.length === 0) {
+            return this.getNextActivePlayer(room, -1);
+        }
+
+        const compareUpCards = (a: Player, b: Player): number => {
+            const aRanks = (a.studUpCards || []).map(card => this.getCardRankValue(card));
+            const bRanks = (b.studUpCards || []).map(card => this.getCardRankValue(card));
+
+            aRanks.sort((x, y) => isRazz ? x - y : y - x);
+            bRanks.sort((x, y) => isRazz ? x - y : y - x);
+
+            const maxLen = Math.max(aRanks.length, bRanks.length);
+            for (let i = 0; i < maxLen; i++) {
+                const av = aRanks[i] ?? (isRazz ? 99 : 0);
+                const bv = bRanks[i] ?? (isRazz ? 99 : 0);
+                if (av === bv) continue;
+                return isRazz ? (av < bv ? 1 : -1) : (av > bv ? 1 : -1);
+            }
+            return 0;
+        };
+
+        let best = candidates[0];
+        let tied: number[] = [best.index];
+
+        for (const candidate of candidates.slice(1)) {
+            const result = compareUpCards(candidate.player!, best.player!);
+            if (result > 0) {
+                best = candidate;
+                tied = [candidate.index];
+            } else if (result === 0) {
+                tied.push(candidate.index);
+            }
+        }
+
+        if (tied.length === 1) {
+            return tied[0];
+        }
+
+        const maxPlayers = room.config.maxPlayers;
+        let idx = (room.dealerBtnIndex + 1) % maxPlayers;
+        for (let i = 0; i < maxPlayers; i++) {
+            if (tied.includes(idx)) {
+                return idx;
+            }
+            idx = (idx + 1) % maxPlayers;
+        }
+
+        return tied[0];
+    }
+
+    /**
      * スタッド用カード配布（3rd Street: 2 down + 1 up）
      */
     dealStudInitial(deck: string[], players: (Player | null)[]): void {
-        const activePlayers = players.filter(p => p !== null && p.stack > 0) as Player[];
+        const activePlayers = players.filter(p =>
+            p !== null && p.stack > 0 && p.status === 'ACTIVE'
+        ) as Player[];
 
         // 2枚ダウンカード
         for (let i = 0; i < 2; i++) {

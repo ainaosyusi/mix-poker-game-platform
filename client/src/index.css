@@ -2277,23 +2277,26 @@ body {
 
 .table-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
-  max-width: 1000px;
-  margin: 0 auto 30px auto;
+  gap: 16px;
+  max-width: 1200px;
+  margin: 0 auto 20px auto;
+  padding: 0 20px;
 }
 
 .header-left {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
 .room-title {
   margin: 0;
-  font-size: 28px;
+  font-size: 16px;
   color: var(--gold);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .room-info {
@@ -2304,8 +2307,8 @@ body {
 
 .room-info-row {
   display: flex;
-  gap: 12px;
-  font-size: 14px;
+  gap: 8px;
+  font-size: 11px;
   color: var(--text-secondary);
 }
 
@@ -2318,33 +2321,34 @@ body {
   color: var(--text-secondary);
 }
 
-/* ゲームバリアント表示 */
+/* ゲームバリアント表示 - 右寄せ */
 .game-variant-display {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   background: linear-gradient(145deg, rgba(30, 30, 30, 0.9), rgba(20, 20, 20, 0.9));
-  padding: 12px 24px;
-  border-radius: 12px;
+  padding: 6px 12px;
+  border-radius: 8px;
   border: 1px solid var(--border-color);
+  margin-left: auto;
 }
 
 .game-variant-label {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-secondary);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
 }
 
 .game-variant-name {
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--gold);
 }
 
 .rotation-info {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-secondary);
 }
 
@@ -2464,6 +2468,13 @@ body {
   color: var(--text-primary);
   font-size: 16px;
   font-weight: 600;
+}
+
+.draw-limit {
+  margin-bottom: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: #c7d2fe;
 }
 
 .draw-cards {
@@ -2679,13 +2690,22 @@ body {
 /* TABLE PAGE RESPONSIVE */
 @media (max-width: 768px) {
   .table-header {
-    flex-direction: column;
-    gap: 16px;
-    text-align: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 10px;
   }
 
   .room-title {
-    font-size: 22px;
+    font-size: 14px;
+  }
+
+  .game-variant-display {
+    padding: 4px 8px;
+    margin-left: 0;
+  }
+
+  .game-variant-name {
+    font-size: 11px;
   }
 
   .your-hand-area {
@@ -3002,4 +3022,90 @@ body {
   border-radius: 4px;
   z-index: 50;
   pointer-events: none;
+}
+
+/* ========================================
+   CHIP & CARD ANIMATIONS
+   ======================================== */
+
+/* チップ移動アニメーション（ベット時） */
+@keyframes chipToPot {
+  0% {
+    opacity: 1;
+    transform: translate(var(--start-x), var(--start-y)) scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translate(
+      calc(var(--start-x) + (var(--end-x) - var(--start-x)) * 0.5),
+      calc(var(--start-y) + (var(--end-y) - var(--start-y)) * 0.5 - 20px)
+    ) scale(0.9);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--end-x), var(--end-y)) scale(0.6);
+  }
+}
+
+/* ポット獲得アニメーション */
+@keyframes potToWinner {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(0, -15px) scale(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--winner-x), var(--winner-y)) scale(0.8);
+  }
+}
+
+/* ホールカード配布アニメーション */
+@keyframes dealCard {
+  0% {
+    opacity: 0;
+    transform: translate(var(--dealer-x), var(--dealer-y)) scale(0.5) rotate(-180deg);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(0, -10px) scale(1.05) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+}
+
+/* 勝者エフェクト */
+@keyframes winnerGlow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 30px rgba(34, 197, 94, 0.9), 0 0 50px rgba(34, 197, 94, 0.5);
+  }
+}
+
+/* チップスタックアニメーション用クラス */
+.chip-animate-to-pot {
+  animation: chipToPot 0.5s ease-out forwards;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.pot-animate-to-winner {
+  animation: potToWinner 0.6s ease-in-out forwards;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.card-deal-animate {
+  animation: dealCard 0.4s ease-out forwards;
+}
+
+.winner-highlight {
+  animation: winnerGlow 1.5s ease-in-out infinite;
 }

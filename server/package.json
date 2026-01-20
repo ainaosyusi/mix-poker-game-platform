@@ -1,4 +1,6 @@
 {
+  "name": "mix-poker-server",
+  "version": "0.3.3",
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.0.7",

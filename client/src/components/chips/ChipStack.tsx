@@ -140,14 +140,31 @@ interface ChipStackProps {
   amount: number;
   className?: string;
   showLabel?: boolean;
+  animate?: 'bet' | 'win' | null;
 }
 
 export const ChipStack = memo(function ChipStack({
   amount,
-  showLabel = true
+  showLabel = true,
+  animate = null,
 }: ChipStackProps) {
   if (amount === 0) return null;
   const chips = getChipsFromAmount(amount);
+
+  // アニメーションスタイル
+  const getAnimationStyle = (): React.CSSProperties => {
+    if (animate === 'bet') {
+      return {
+        animation: 'chipBetIn 0.35s ease-out',
+      };
+    }
+    if (animate === 'win') {
+      return {
+        animation: 'winnerGlow 1.5s ease-in-out infinite',
+      };
+    }
+    return {};
+  };
 
   return (
     <div
@@ -158,6 +175,7 @@ export const ChipStack = memo(function ChipStack({
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'center',
+        ...getAnimationStyle(),
       }}
     >
       {chips.map((val, idx) => (
@@ -187,6 +205,23 @@ export const ChipStack = memo(function ChipStack({
           ${amount.toLocaleString()}
         </div>
       )}
+      {/* アニメーション用のインラインstyle */}
+      <style>{`
+        @keyframes chipBetIn {
+          0% {
+            opacity: 0;
+            transform: scale(0.3) translateY(-20px);
+          }
+          60% {
+            opacity: 1;
+            transform: scale(1.15) translateY(3px);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+          }
+        }
+      `}</style>
     </div>
   );
 });

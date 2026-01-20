@@ -16,6 +16,16 @@ export interface RoomConfig {
     studAnte?: number;         // Studゲームのアンティ（デフォルト: BB/5）
 }
 
+export type GameVariant =
+    | 'NLH'
+    | 'PLO'
+    | 'PLO8'
+    | '7CS'
+    | '7CS8'
+    | 'RAZZ'
+    | '2-7_TD'
+    | 'BADUGI';
+
 // ========== Pot State ==========
 
 export interface PotState {
@@ -40,6 +50,11 @@ export interface Player {
     totalBet: number;          // そのハンドでの総ベット額（サイドポット計算用）
     status: PlayerStatus;      // プレイヤーの状態
     hand: string[] | null;     // 手札（サーバー内部のみ保持、クライアントには伏せて送る）
+    resumeToken?: string;      // 再接続用トークン
+    pendingJoin?: boolean;     // 次ハンドから参加
+    waitingForBB?: boolean;    // BB待ち
+    pendingSitOut?: boolean;   // ハンド終了後にSit Out
+    disconnected?: boolean;    // 切断中
 
     // ゲーム固有情報（オプショナル）
     drawDiscards?: number;     // ドローゲームで何枚交換したか
@@ -138,17 +153,20 @@ export interface CreateRoomRequest {
 export interface JoinRoomRequest {
     roomId: string;
     playerName: string;
+    resumeToken?: string;
 }
 
 export interface SitDownRequest {
     seatIndex: number;                  // 0-5の座席番号
     buyIn: number;                      // バイイン額
+    resumeToken?: string;               // 再接続用トークン
 }
 
 export interface PlayerActionRequest {
     type: 'BET' | 'FOLD' | 'CHECK' | 'CALL' | 'RAISE';
     amount?: number;                    // BET/RAISEの場合に必要
     seqId: number;                      // 同期ズレ防止ID
+    actionToken?: string;               // 二重実行防止トークン
 }
 
 // サーバー → クライアント

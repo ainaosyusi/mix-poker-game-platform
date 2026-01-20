@@ -1,0 +1,14 @@
+[build]
+builder = "nixpacks"
+
+[build.nixpacksPlan]
+phases.setup = ["npm:20"]
+phases.install = ["npm install --prefix client", "npm install --prefix server"]
+phases.build = ["npm run build --prefix client", "npm run build --prefix server"]
+
+[deploy]
+startCommand = "cd server && npm run start"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

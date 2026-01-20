@@ -142,7 +142,7 @@ interface LowHandRank {
 const lowRankValue = (rank: string): number => {
     if (rank === 'A') return 1;
     const values: { [key: string]: number } = {
-        '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'T': 10,
+        '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'T': 10, '10': 10,
         'J': 11, 'Q': 12, 'K': 13
     };
     return values[rank] || 0;

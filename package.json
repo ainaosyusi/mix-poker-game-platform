@@ -1,0 +1,22 @@
+{
+  "name": "mix-poker-app",
+  "version": "0.3.3",
+  "private": true,
+  "description": "Mix Poker - Multiplayer poker platform supporting multiple game variants",
+  "scripts": {
+    "install:all": "cd client && npm install && cd ../server && npm install",
+    "build:client": "cd client && npm run build",
+    "build:server": "cd server && npm run build",
+    "build": "npm run build:client && npm run build:server",
+    "start": "cd server && npm run start",
+    "dev:client": "cd client && npm run dev",
+    "dev:server": "cd server && npm run dev",
+    "test": "cd server && npm run test"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": ["poker", "multiplayer", "game", "socket.io"],
+  "author": "",
+  "license": "MIT"
+}

@@ -40,14 +40,28 @@ export class GameEngine {
 
         // プレイヤーの状態をリセット
         for (const player of room.players) {
-            if (player && player.stack > 0) {
+            if (!player || player.stack <= 0) continue;
+
+            if (player.pendingSitOut) {
+                player.status = 'SIT_OUT';
+                player.pendingSitOut = false;
+                player.pendingJoin = false;
+                player.waitingForBB = false;
+            } else if (player.disconnected) {
+                player.status = 'SIT_OUT';
+            } else if (player.status === 'SIT_OUT') {
+                if (player.pendingJoin && !player.waitingForBB) {
+                    player.status = 'ACTIVE';
+                    player.pendingJoin = false;
+                }
+            } else {
                 player.status = 'ACTIVE';
-                player.hand = null;
-                player.bet = 0;
-                player.totalBet = 0;
-                // Stud用のアップカードもクリア
-                if (player.studUpCards) player.studUpCards = [];
             }
+
+            player.hand = null;
+            player.bet = 0;
+            player.totalBet = 0;
+            if (player.studUpCards) player.studUpCards = [];
         }
 
         // ポットをリセット
@@ -179,7 +193,11 @@ export class GameEngine {
             case 'BET':
             case 'RAISE':
                 const betAmount = action.amount || 0;
+                if (!Number.isFinite(betAmount) || betAmount <= 0) {
+                    return { success: false, error: 'Invalid bet amount' };
+                }
                 const variantConfigBet = getVariantConfig(room.gameState.gameVariant);
+                const isAllInBet = betAmount >= player.stack;
 
                 // Fixed-Limit: キャップチェック（5-bet cap = 4 raises）
                 if (variantConfigBet.betStructure === 'fixed') {
@@ -189,16 +207,11 @@ export class GameEngine {
                     }
                 }
 
-                // 最小ベット額の計算
-                // BET: minRaise（BB額）
-                // RAISE: currentBet + minRaise（現在のベット + レイズ増分）
-                const minTotal = room.gameState.currentBet === 0
-                    ? room.gameState.minRaise  // BET: BB額
-                    : room.gameState.currentBet + room.gameState.minRaise;  // RAISE: 2xBBまたはそれ以上
+                const minTotal = this.getMinBetTo(room, player);
 
                 const totalBet = player.bet + betAmount;
 
-                if (totalBet < minTotal) {
+                if (totalBet < minTotal && !isAllInBet) {
                     return { success: false, error: `Minimum raise is ${minTotal}` };
                 }
                 if (betAmount > player.stack) {
@@ -214,19 +227,25 @@ export class GameEngine {
                 }
 
                 const raiseSize = totalBet - room.gameState.currentBet;
+                const reopensAction = raiseSize >= room.gameState.minRaise;
 
                 player.stack -= betAmount;
                 player.bet = totalBet;
                 player.totalBet += betAmount;
                 room.gameState.pot.main += betAmount;
                 room.gameState.currentBet = totalBet;
-                room.gameState.minRaise = raiseSize;
 
-                // レイズカウンタを増加（BET/RAISE共に）
-                room.gameState.raisesThisRound++;
+                if (reopensAction) {
+                    room.gameState.minRaise = raiseSize;
+                    // アグレッシブアクション後、このプレイヤーがストリートを閉じる
+                    room.streetStarterIndex = room.activePlayerIndex;
+                    if (variantConfigBet.betStructure === 'fixed') {
+                        room.gameState.raisesThisRound++;
+                    }
+                } else if (variantConfigBet.betStructure !== 'fixed') {
+                    // NL/PLはキャップ管理しないためカウント不要
+                }
 
-                // アグレッシブアクション後、このプレイヤーがストリートを閉じる
-                room.streetStarterIndex = room.activePlayerIndex;
                 // 最後のアグレッサーを記録（ショーダウン順序用）
                 room.lastAggressorIndex = room.activePlayerIndex;
 
@@ -238,6 +257,8 @@ export class GameEngine {
             case 'ALL_IN':
                 const allInAmount = player.stack;
                 const newTotal = player.bet + allInAmount;
+                const raiseSizeAllIn = newTotal - room.gameState.currentBet;
+                const reopensAllIn = raiseSizeAllIn >= room.gameState.minRaise;
 
                 player.bet = newTotal;
                 player.totalBet += allInAmount;
@@ -246,12 +267,19 @@ export class GameEngine {
                 room.gameState.pot.main += allInAmount;
 
                 if (newTotal > room.gameState.currentBet) {
-                    room.gameState.minRaise = newTotal - room.gameState.currentBet;
                     room.gameState.currentBet = newTotal;
-                    // レイズを含むALL_INの場合、このプレイヤーがストリートを閉じる
-                    room.streetStarterIndex = room.activePlayerIndex;
+                    if (reopensAllIn) {
+                        room.gameState.minRaise = raiseSizeAllIn;
+                        // レイズを含むALL_INの場合、このプレイヤーがストリートを閉じる
+                        room.streetStarterIndex = room.activePlayerIndex;
+                    }
                     // 最後のアグレッサーを記録
                     room.lastAggressorIndex = room.activePlayerIndex;
+                    if (getVariantConfig(room.gameState.gameVariant).betStructure === 'fixed' && reopensAllIn) {
+                        room.gameState.raisesThisRound++;
+                    } else if (getVariantConfig(room.gameState.gameVariant).betStructure !== 'fixed') {
+                        room.gameState.raisesThisRound++;
+                    }
                 }
                 break;
         }
@@ -373,7 +401,6 @@ export class GameEngine {
             }
         }
         room.gameState.currentBet = 0;
-        room.gameState.minRaise = room.config.bigBlind;
         room.gameState.raisesThisRound = 0; // レイズカウンタリセット
 
         const phase = room.gameState.status;
@@ -402,6 +429,10 @@ export class GameEngine {
             return;
         }
 
+        room.gameState.minRaise = variantConfig.betStructure === 'fixed'
+            ? this.getFixedBetSize(room)
+            : room.config.bigBlind;
+
         // 全員ALL INなら自動的に次へ進む
         if (actionablePlayers.length === 0 && allInPlayers.length >= 2) {
             console.log('💥 All players still ALL IN - continuing auto-deal');
@@ -425,8 +456,9 @@ export class GameEngine {
         if (variantConfig.hasButton) {
             room.activePlayerIndex = this.dealer.getNextActivePlayer(room, room.dealerBtnIndex);
         } else {
-            // Stud: 最強/最弱のアップカードを持つプレイヤーから（簡易版: 座席0から）
-            room.activePlayerIndex = this.dealer.getNextActivePlayer(room, -1);
+            // Stud: 最強/最弱のアップカードを持つプレイヤーから
+            const isRazz = room.gameState.gameVariant === 'RAZZ';
+            room.activePlayerIndex = this.dealer.getStudActionStartIndex(room, isRazz);
         }
         // 新しいストリートの開始プレイヤーを記録
         room.streetStarterIndex = room.activePlayerIndex;
@@ -588,7 +620,10 @@ export class GameEngine {
                 }
             }
             room.gameState.currentBet = 0;
-            room.gameState.minRaise = room.config.bigBlind;
+            const variantConfig = getVariantConfig(room.gameState.gameVariant);
+            room.gameState.minRaise = variantConfig.betStructure === 'fixed'
+                ? this.getFixedBetSize(room)
+                : room.config.bigBlind;
             room.gameState.raisesThisRound = 0;
 
             // アクティブプレイヤーを設定（ボタンの次から）
@@ -650,7 +685,9 @@ export class GameEngine {
      */
     getSeatedPlayers(room: Room): Player[] {
         return room.players.filter(p =>
-            p !== null && p.stack > 0
+            p !== null &&
+            p.stack > 0 &&
+            (p.status === 'ACTIVE' || p.waitingForBB)
         ) as Player[];
     }
 
@@ -739,11 +776,7 @@ export class GameEngine {
         }
 
         const callAmount = Math.max(0, room.gameState.currentBet - player.bet);
-
-        // 最小ベット額（TO値）
-        const minBetTo = room.gameState.currentBet === 0
-            ? room.gameState.minRaise
-            : room.gameState.currentBet + room.gameState.minRaise;
+        const minBetTo = this.getMinBetTo(room, player);
 
         // 最大ベット額の計算
         let maxBetTo: number;
@@ -783,6 +816,23 @@ export class GameEngine {
             raisesRemaining,
             fixedBetSize
         };
+    }
+
+    /**
+     * 最小ベット/レイズの「TO」値を取得
+     */
+    private getMinBetTo(room: Room, player: Player): number {
+        const variantConfig = getVariantConfig(room.gameState.gameVariant);
+        if (variantConfig.betStructure === 'fixed') {
+            const fixedBetSize = this.getFixedBetSize(room);
+            return room.gameState.currentBet === 0
+                ? fixedBetSize
+                : room.gameState.currentBet + fixedBetSize;
+        }
+
+        return room.gameState.currentBet === 0
+            ? room.gameState.minRaise
+            : room.gameState.currentBet + room.gameState.minRaise;
     }
 
     /**

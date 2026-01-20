@@ -1,7 +1,14 @@
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// ESM用の__dirname取得
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import { evaluateHand, compareHands } from './handEvaluator.js';
 import { roomManager } from './RoomManager.js';
 import { GameEngine } from './GameEngine.js';
@@ -19,6 +26,8 @@ import type {
 import { RotationManager } from './RotationManager.js';
 import { MetaGameManager } from './MetaGameManager.js';
 import { PotManager } from './PotManager.js';
+import { getVariantConfig } from './gameVariants.js';
+import { logEvent, incrementMetric } from './logger.js';
 
 // Phase 3-B: ゲームエンジンインスタンス（部屋ごとに管理）
 const gameEngines: Map<string, GameEngine> = new Map();
@@ -27,6 +36,11 @@ const actionValidator = new ActionValidator();
 const metaGameManager = new MetaGameManager();
 const rotationManager = new RotationManager();
 const potManager = new PotManager();
+const actionTokens: Map<string, { token: string; issuedAt: number }> = new Map(); // playerId -> token meta
+const actionInFlight: Set<string> = new Set(); // playerId in progress
+const roomActionInFlight: Set<string> = new Set(); // roomId in progress
+const invalidActionCounts: Map<string, { count: number; lastAt: number }> = new Map();
+const actionRateLimit: Map<string, { count: number; windowStart: number }> = new Map();
 
 // タイマー管理
 interface PlayerTimer {
@@ -42,6 +56,9 @@ const playerTimeBanks: Map<string, number> = new Map(); // playerId -> chips
 const MAX_TIMER_SECONDS = 30;
 const INITIAL_TIMEBANK_CHIPS = 5;
 const HAND_END_DELAY_MS = 2000;
+const ACTION_TOKEN_TTL_MS = 35000;
+const ACTION_RATE_LIMIT_WINDOW_MS = 2000;
+const ACTION_RATE_LIMIT_MAX = 6;
 
 // タイマー開始関数
 function startPlayerTimer(roomId: string, playerId: string, io: Server) {
@@ -98,6 +115,8 @@ function handleTimerTimeout(roomId: string, playerId: string, io: Server) {
   const player = room.players.find(p => p?.socketId === playerId);
   if (!player) return;
 
+  actionTokens.delete(playerId);
+
   // チェック可能ならチェック、そうでなければフォールド
   const validActions = engine.getValidActions(room, playerId);
   const actionType: ActionType = validActions.includes('CHECK') ? 'CHECK' : 'FOLD';
@@ -114,6 +133,35 @@ function handleTimerTimeout(roomId: string, playerId: string, io: Server) {
     // ショーダウンチェック等の処理は player-action と同様に行う
     processPostAction(roomId, room, engine, io);
   }
+}
+
+function issueActionToken(playerId: string): string {
+  const token = randomUUID();
+  actionTokens.set(playerId, { token, issuedAt: Date.now() });
+  return token;
+}
+
+function emitYourTurn(roomId: string, room: any, engine: GameEngine, io: Server, player: any) {
+  const validActions = engine.getValidActions(room, player.socketId);
+  const bettingInfo = engine.getBettingInfo(room, player.socketId);
+  const actionToken = issueActionToken(player.socketId);
+  io.to(player.socketId).emit('your-turn', {
+    validActions,
+    currentBet: room.gameState.currentBet,
+    minRaise: bettingInfo.minBet,
+    maxBet: bettingInfo.maxBet,
+    betStructure: bettingInfo.betStructure,
+    isCapped: bettingInfo.isCapped,
+    raisesRemaining: bettingInfo.raisesRemaining,
+    fixedBetSize: bettingInfo.fixedBetSize,
+    timeout: MAX_TIMER_SECONDS * 1000,
+    actionToken
+  });
+
+  startPlayerTimer(roomId, player.socketId, io);
+
+  const timeBankChips = playerTimeBanks.get(player.socketId) || INITIAL_TIMEBANK_CHIPS;
+  io.to(player.socketId).emit('timebank-update', { chips: timeBankChips });
 }
 
 // アクション後の共通処理
@@ -169,22 +217,7 @@ function processPostAction(roomId: string, room: any, engine: GameEngine, io: Se
   if (room.activePlayerIndex !== -1) {
     const nextPlayer = room.players[room.activePlayerIndex];
     if (nextPlayer) {
-      const validActions = engine.getValidActions(room, nextPlayer.socketId);
-      const bettingInfo = engine.getBettingInfo(room, nextPlayer.socketId);
-      io.to(nextPlayer.socketId).emit('your-turn', {
-        validActions,
-        currentBet: room.gameState.currentBet,
-        minRaise: bettingInfo.minBet,
-        maxBet: bettingInfo.maxBet,
-        betStructure: bettingInfo.betStructure,
-        isCapped: bettingInfo.isCapped,
-        raisesRemaining: bettingInfo.raisesRemaining,
-        fixedBetSize: bettingInfo.fixedBetSize,
-        timeout: MAX_TIMER_SECONDS * 1000
-      });
-
-      // 新しいタイマーを開始
-      startPlayerTimer(roomId, nextPlayer.socketId, io);
+      emitYourTurn(roomId, room, engine, io, nextPlayer);
     }
   }
 }
@@ -228,18 +261,22 @@ function getRoomIdFromSocket(socket: any): string | null {
 }
 
 const app = express();
-// 開発環境では複数のポートを許可
-const ALLOWED_ORIGINS: string[] = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'http://localhost:5175',
-  process.env.CLIENT_URL
-].filter((url): url is string => Boolean(url));
+const isProduction = process.env.NODE_ENV === 'production';
+
+// CORS設定: 本番環境では同一オリジン、開発環境では複数ポート許可
+const ALLOWED_ORIGINS: string[] = isProduction
+  ? [process.env.CLIENT_URL].filter((url): url is string => Boolean(url))
+  : [
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://localhost:5175',
+      process.env.CLIENT_URL
+    ].filter((url): url is string => Boolean(url));
 
 app.use(cors({
   origin: (origin, callback) => {
     // originがない場合（同一オリジンリクエスト）または許可リストに含まれる場合は許可
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+    if (!origin || ALLOWED_ORIGINS.includes(origin) || isProduction) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -248,10 +285,25 @@ app.use(cors({
   credentials: true
 }));
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Mix Poker Game Server is running' });
-});
+// 本番環境: 静的ファイル配信
+if (isProduction) {
+  const clientDistPath = path.join(__dirname, '../client/dist');
+  app.use(express.static(clientDistPath));
+
+  // API以外のリクエストはindex.htmlを返す（SPA対応）
+  app.get('*', (req, res, next) => {
+    // Socket.IOやAPIリクエストは除外
+    if (req.path.startsWith('/socket.io')) {
+      return next();
+    }
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+} else {
+  // 開発環境: Health check endpoint
+  app.get('/', (req, res) => {
+    res.json({ status: 'ok', message: 'Mix Poker Game Server is running' });
+  });
+}
 
 const httpServer = createServer(app);
 // Socket.ioの設定 (CORS許可)
@@ -289,6 +341,8 @@ io.on('connection', (socket) => {
       io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
 
       console.log(`📦 Room ${room.id} created by ${data.playerName}`);
+      logEvent('room_created', { roomId: room.id, playerName: data.playerName, isPrivate: data.isPrivate });
+      incrementMetric('room_created', { isPrivate: Boolean(data.isPrivate) });
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
@@ -304,6 +358,31 @@ io.on('connection', (socket) => {
         return;
       }
 
+      if (data.resumeToken) {
+        const existingPlayer = room.players.find(p => p?.resumeToken === data.resumeToken);
+        if (existingPlayer) {
+          existingPlayer.socketId = socket.id;
+          existingPlayer.disconnected = false;
+          (socket.data as any).playerName = existingPlayer.name;
+          if (room.gameState.status === 'WAITING' && existingPlayer.status === 'SIT_OUT' && !existingPlayer.pendingSitOut) {
+            existingPlayer.status = 'ACTIVE';
+          } else if (room.gameState.status !== 'WAITING') {
+            existingPlayer.pendingJoin = true;
+          }
+
+          socket.join(`room:${data.roomId}`);
+          socket.emit('room-joined', {
+            room: sanitizeRoomForViewer(room, socket.id),
+            yourSocketId: socket.id,
+            yourHand: existingPlayer.hand || null
+          });
+          logEvent('room_resumed', { roomId: data.roomId, playerName: existingPlayer.name });
+          incrementMetric('room_resumed');
+          io.to(`room:${data.roomId}`).emit('room-state-update', room);
+          return;
+        }
+      }
+
       // プレイヤー名をsocket.dataに保存（sit-down時に使用）
       (socket.data as any).playerName = data.playerName;
 
@@ -311,11 +390,14 @@ io.on('connection', (socket) => {
       socket.join(`room:${data.roomId}`);
 
       socket.emit('room-joined', {
-        room,
-        yourSocketId: socket.id
+        room: sanitizeRoomForViewer(room, socket.id),
+        yourSocketId: socket.id,
+        yourHand: null
       });
 
       console.log(`🚪 ${data.playerName} joined room ${data.roomId}`);
+      logEvent('room_joined', { roomId: data.roomId, playerName: data.playerName });
+      incrementMetric('room_joined');
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
@@ -376,6 +458,8 @@ io.on('connection', (socket) => {
 
       // socket.dataにplayerNameを保存しておく（join-room時に設定することを想定）
       const playerName = (socket.data as any).playerName || 'Anonymous';
+      const variantConfig = getVariantConfig(room.gameState.gameVariant);
+      const isWaiting = room.gameState.status === 'WAITING';
 
       // 着席するプレイヤー情報を作成
       const player: RoomPlayer = {
@@ -384,13 +468,19 @@ io.on('connection', (socket) => {
         stack: data.buyIn,
         bet: 0,
         totalBet: 0,
-        status: 'SIT_OUT' as PlayerStatus,
-        hand: null
+        status: (isWaiting ? 'ACTIVE' : 'SIT_OUT') as PlayerStatus,
+        hand: null,
+        resumeToken: data.resumeToken,
+        pendingJoin: !isWaiting,
+        waitingForBB: !isWaiting && variantConfig.hasButton,
+        disconnected: false
       };
 
       roomManager.sitDown(roomId, data.seatIndex, player);
 
       console.log(`✅ ${playerName} sat down at seat ${data.seatIndex}`);
+      logEvent('sit_down', { roomId, playerName, seatIndex: data.seatIndex });
+      incrementMetric('sit_down');
 
       // 着席成功を通知（本人）
       socket.emit('sit-down-success', { seatIndex: data.seatIndex });
@@ -513,26 +603,7 @@ io.on('connection', (socket) => {
       // アクティブプレイヤーに行動を促す
       const activePlayer = room.players[room.activePlayerIndex];
       if (activePlayer) {
-        const validActions = engine.getValidActions(room, activePlayer.socketId);
-        const bettingInfo = engine.getBettingInfo(room, activePlayer.socketId);
-        io.to(activePlayer.socketId).emit('your-turn', {
-          validActions,
-          currentBet: room.gameState.currentBet,
-          minRaise: bettingInfo.minBet,
-          maxBet: bettingInfo.maxBet,
-          betStructure: bettingInfo.betStructure,
-          isCapped: bettingInfo.isCapped,
-          raisesRemaining: bettingInfo.raisesRemaining,
-          fixedBetSize: bettingInfo.fixedBetSize,
-          timeout: MAX_TIMER_SECONDS * 1000
-        });
-
-        // タイマー開始
-        startPlayerTimer(roomId, activePlayer.socketId, io);
-
-        // タイムバンク情報を送信
-        const timeBankChips = playerTimeBanks.get(activePlayer.socketId) || INITIAL_TIMEBANK_CHIPS;
-        io.to(activePlayer.socketId).emit('timebank-update', { chips: timeBankChips });
+        emitYourTurn(roomId, room, engine, io, activePlayer);
       }
 
       console.log(`🎮 Game started in room ${roomId}`);
@@ -572,7 +643,7 @@ io.on('connection', (socket) => {
   });
 
   // プレイヤーアクション
-  socket.on('player-action', (data: { type: ActionType; amount?: number }) => {
+  socket.on('player-action', (data: { type: ActionType; amount?: number; actionToken?: string }) => {
     try {
       const roomId = getRoomIdFromSocket(socket);
       if (!roomId) {
@@ -592,21 +663,95 @@ io.on('connection', (socket) => {
         return;
       }
 
+      if (roomActionInFlight.has(roomId)) {
+        socket.emit('action-invalid', { reason: 'Room is processing another action' });
+        return;
+      }
+
+      if (room.gameState.isDrawPhase) {
+        socket.emit('action-invalid', { reason: 'Draw phase in progress' });
+        logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Draw phase in progress' });
+        incrementMetric('action_invalid', { reason: 'draw_phase' });
+        return;
+      }
+
+      const now = Date.now();
+      const rate = actionRateLimit.get(socket.id);
+      if (!rate || now - rate.windowStart > ACTION_RATE_LIMIT_WINDOW_MS) {
+        actionRateLimit.set(socket.id, { count: 1, windowStart: now });
+      } else {
+        rate.count += 1;
+        if (rate.count > ACTION_RATE_LIMIT_MAX) {
+          const ip = socket.handshake.address;
+          console.warn(`⚠️ Rate limit: ${socket.id} (${ip}) ${rate.count}/${ACTION_RATE_LIMIT_WINDOW_MS}ms`);
+          socket.emit('action-invalid', { reason: 'Too many actions' });
+          logEvent('rate_limited', { roomId, playerId: socket.id, ip, count: rate.count });
+          incrementMetric('rate_limited');
+          return;
+        }
+      }
+
+      const token = data.actionToken;
+      const expectedToken = actionTokens.get(socket.id);
+      if (!token || !expectedToken || token !== expectedToken.token) {
+        socket.emit('action-invalid', { reason: 'Invalid action token' });
+        logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Invalid action token' });
+        incrementMetric('action_invalid', { reason: 'invalid_token' });
+        const stats = invalidActionCounts.get(socket.id);
+        if (!stats || now - stats.lastAt > 5000) {
+          invalidActionCounts.set(socket.id, { count: 1, lastAt: now });
+        } else {
+          stats.count += 1;
+          stats.lastAt = now;
+          if (stats.count >= 3) {
+            console.warn(`⚠️ Repeated invalid actions from ${socket.id} (${stats.count} in 5s)`);
+            logEvent('invalid_action_spam', { roomId, playerId: socket.id, count: stats.count });
+            incrementMetric('invalid_action_spam');
+          }
+        }
+        return;
+      }
+
+      if (Date.now() - expectedToken.issuedAt > ACTION_TOKEN_TTL_MS) {
+        actionTokens.delete(socket.id);
+        socket.emit('action-invalid', { reason: 'Action token expired' });
+        logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Action token expired' });
+        incrementMetric('action_invalid', { reason: 'token_expired' });
+        return;
+      }
+
+      if (actionInFlight.has(socket.id)) {
+        socket.emit('action-invalid', { reason: 'Action already in progress' });
+        return;
+      }
+
       // タイマーをクリア
       clearPlayerTimer(socket.id);
 
-      // アクションを処理
-      const result = engine.processAction(room, {
-        playerId: socket.id,
-        type: data.type,
-        amount: data.amount,
-        timestamp: Date.now()
-      });
+      actionInFlight.add(socket.id);
+      roomActionInFlight.add(roomId);
+      let result;
+      try {
+        // アクションを処理
+        result = engine.processAction(room, {
+          playerId: socket.id,
+          type: data.type,
+          amount: data.amount,
+          timestamp: Date.now()
+        });
+      } finally {
+        actionInFlight.delete(socket.id);
+        roomActionInFlight.delete(roomId);
+      }
 
       if (!result.success) {
         socket.emit('action-invalid', { reason: result.error });
+        logEvent('action_invalid', { roomId, playerId: socket.id, reason: result.error });
+        incrementMetric('action_invalid', { reason: 'engine_reject' });
+        startPlayerTimer(roomId, socket.id, io);
         return;
       }
+      actionTokens.delete(socket.id);
 
       // ショーダウンチェック
       if (room.gameState.status === 'SHOWDOWN') {
@@ -754,26 +899,7 @@ io.on('connection', (socket) => {
       if (room.activePlayerIndex !== -1) {
         const nextPlayer = room.players[room.activePlayerIndex];
         if (nextPlayer) {
-          const validActions = engine.getValidActions(room, nextPlayer.socketId);
-          const bettingInfo = engine.getBettingInfo(room, nextPlayer.socketId);
-          io.to(nextPlayer.socketId).emit('your-turn', {
-            validActions,
-            currentBet: room.gameState.currentBet,
-            minRaise: bettingInfo.minBet,
-            maxBet: bettingInfo.maxBet,
-            betStructure: bettingInfo.betStructure,
-            isCapped: bettingInfo.isCapped,
-            raisesRemaining: bettingInfo.raisesRemaining,
-            fixedBetSize: bettingInfo.fixedBetSize,
-            timeout: MAX_TIMER_SECONDS * 1000
-          });
-
-          // タイマー開始
-          startPlayerTimer(roomId, nextPlayer.socketId, io);
-
-          // タイムバンク情報を送信
-          const timeBankChips = playerTimeBanks.get(nextPlayer.socketId) || INITIAL_TIMEBANK_CHIPS;
-          io.to(nextPlayer.socketId).emit('timebank-update', { chips: timeBankChips });
+          emitYourTurn(roomId, room, engine, io, nextPlayer);
         }
       }
 
@@ -831,18 +957,42 @@ io.on('connection', (socket) => {
         return;
       }
 
+      const variantConfig = getVariantConfig(room.gameState.gameVariant);
+      const maxDrawCount = variantConfig.maxDrawCount ?? player.hand?.length ?? 0;
+      const discardIndexes = Array.isArray(data.discardIndexes) ? data.discardIndexes : [];
+      const uniqueIndexes = new Set<number>();
+      for (const idx of discardIndexes) {
+        if (!Number.isInteger(idx)) {
+          socket.emit('error', { message: 'Invalid discard index' });
+          return;
+        }
+        uniqueIndexes.add(idx);
+      }
+      if (discardIndexes.length !== uniqueIndexes.size) {
+        socket.emit('error', { message: 'Duplicate discard indexes' });
+        return;
+      }
+      if (discardIndexes.length > maxDrawCount) {
+        socket.emit('error', { message: `Too many cards to discard (max ${maxDrawCount})` });
+        return;
+      }
+      if (!player.hand || discardIndexes.some(idx => idx < 0 || idx >= player.hand!.length)) {
+        socket.emit('error', { message: 'Discard index out of range' });
+        return;
+      }
+
       // カード交換を実行
       const deck = engine.getDeck();
       const dealer = new Dealer();
-      dealer.exchangeDrawCards(deck, player, data.discardIndexes);
+      dealer.exchangeDrawCards(deck, player, discardIndexes);
 
       // 交換枚数を記録
-      player.drawDiscards = data.discardIndexes.length;
+      player.drawDiscards = discardIndexes.length;
 
       // ドロー完了をマーク
       engine.markDrawComplete(room, socket.id);
 
-      console.log(`🔄 ${player.name} drew ${data.discardIndexes.length} cards`);
+      console.log(`🔄 ${player.name} drew ${discardIndexes.length} cards`);
 
       // プレイヤーに新しい手札を送信
       io.to(socket.id).emit('draw-complete', {
@@ -853,7 +1003,7 @@ io.on('connection', (socket) => {
       io.to(`room:${roomId}`).emit('player-drew', {
         playerId: socket.id,
         playerName: player.name,
-        cardCount: data.discardIndexes.length
+        cardCount: discardIndexes.length
       });
 
       // 全員完了したかチェック
@@ -865,6 +1015,19 @@ io.on('connection', (socket) => {
       // 全員に更新を送信
       io.to(`room:${roomId}`).emit('room-state-update', room);
 
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // 状態再同期
+  socket.on('request-room-state', () => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) return;
+      const room = roomManager.getRoomById(roomId);
+      if (!room) return;
+      socket.emit('room-state-update', sanitizeRoomForViewer(room, socket.id));
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
@@ -1008,6 +1171,7 @@ io.on('connection', (socket) => {
 
       if (data.handsPerGame !== undefined) {
         room.rotation.handsPerGame = data.handsPerGame;
+        rotationManager.setHandsPerGame(data.handsPerGame);
       }
 
       const gamesStr = room.rotation.gamesList.join(' → ');
@@ -1062,6 +1226,50 @@ io.on('connection', (socket) => {
     }
   });
 
+  // デバッグ用: 次ゲームへ強制切替
+  socket.on('force-next-game', () => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) {
+        socket.emit('error', { message: 'You are not in any room' });
+        return;
+      }
+
+      const room = roomManager.getRoomById(roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Room not found' });
+        return;
+      }
+
+      if (room.gameState.status !== 'WAITING') {
+        socket.emit('error', { message: 'Cannot change game while hand is in progress' });
+        return;
+      }
+
+      if (room.rotation.gamesList.length <= 1) {
+        socket.emit('error', { message: 'Rotation is not enabled' });
+        return;
+      }
+
+      const nextIndex = (room.rotation.currentGameIndex + 1) % room.rotation.gamesList.length;
+      const nextGame = room.rotation.gamesList[nextIndex];
+      room.rotation.currentGameIndex = nextIndex;
+      room.gameState.gameVariant = nextGame;
+
+      if (nextIndex === 0) {
+        room.rotation.orbitCount = (room.rotation.orbitCount || 0) + 1;
+      }
+
+      io.to(`room:${roomId}`).emit('next-game', {
+        nextGame,
+        gamesList: room.rotation.gamesList
+      });
+      io.to(`room:${roomId}`).emit('room-state-update', room);
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
   // 離席
   socket.on('leave-seat', () => {
     try {
@@ -1087,9 +1295,67 @@ io.on('connection', (socket) => {
     }
   });
 
+  // シットアウト切替
+  socket.on('sit-out', (data: { enabled: boolean }) => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) {
+        socket.emit('error', { message: 'You are not in any room' });
+        return;
+      }
+
+      const room = roomManager.getRoomById(roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Room not found' });
+        return;
+      }
+
+      const player = room.players.find(p => p?.socketId === socket.id);
+      if (!player) {
+        socket.emit('error', { message: 'You are not seated' });
+        return;
+      }
+
+      if (data.enabled) {
+        if (room.gameState.status === 'WAITING') {
+          player.status = 'SIT_OUT';
+          player.pendingJoin = false;
+        } else {
+          player.pendingSitOut = true;
+        }
+        console.log(`🪑 ${player.name} set to sit out`);
+        logEvent('sit_out', { roomId, playerName: player.name });
+        incrementMetric('sit_out');
+      } else {
+        player.pendingSitOut = false;
+        if (room.gameState.status === 'WAITING') {
+          player.status = 'ACTIVE';
+          player.pendingJoin = false;
+          player.waitingForBB = false;
+        } else {
+          player.pendingJoin = true;
+        }
+        console.log(`🪑 ${player.name} set to sit in`);
+        logEvent('sit_in', { roomId, playerName: player.name });
+        incrementMetric('sit_in');
+      }
+
+      io.to(`room:${roomId}`).emit('room-state-update', room);
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
   // 切断した時（既存のハンドラを拡張）
   socket.on('disconnect', () => {
     console.log('👋 Player disconnected:', socket.id);
+    logEvent('disconnect', { playerId: socket.id });
+    incrementMetric('disconnect');
+    clearPlayerTimer(socket.id);
+    actionTokens.delete(socket.id);
+    actionInFlight.delete(socket.id);
+    invalidActionCounts.delete(socket.id);
+    actionRateLimit.delete(socket.id);
 
     // Phase 3-A: すべての部屋から離席させる
     const roomIds = Array.from(socket.rooms).filter(r => r.startsWith('room:')).map(r => r.slice(5));
@@ -1142,28 +1408,27 @@ io.on('connection', (socket) => {
                 if (room.activePlayerIndex !== -1) {
                   const nextPlayer = room.players[room.activePlayerIndex];
                   if (nextPlayer) {
-                    const validActions = engine.getValidActions(room, nextPlayer.socketId);
-                    const bettingInfo = engine.getBettingInfo(room, nextPlayer.socketId);
-                    io.to(nextPlayer.socketId).emit('your-turn', {
-                      validActions,
-                      currentBet: room.gameState.currentBet,
-                      minRaise: bettingInfo.minBet,
-                      maxBet: bettingInfo.maxBet,
-                      betStructure: bettingInfo.betStructure,
-                      isCapped: bettingInfo.isCapped,
-                      raisesRemaining: bettingInfo.raisesRemaining,
-                      fixedBetSize: bettingInfo.fixedBetSize,
-                      timeout: 30000
-                    });
+                    emitYourTurn(roomId, room, engine, io, nextPlayer);
                   }
                 }
               }
             }
           }
 
-          // プレイヤーを離席させる
-          roomManager.standUp(roomId, socket.id);
-          io.to(`room:${roomId}`).emit('room-state-update', room);
+          if (playerSeatIndex !== -1) {
+            const player = room.players[playerSeatIndex];
+            if (player) {
+              player.disconnected = true;
+              if (room.gameState.status === 'WAITING') {
+                player.status = 'SIT_OUT';
+                player.pendingJoin = false;
+              }
+              console.log(`🔌 ${player.name} marked disconnected in room ${roomId}`);
+              logEvent('player_disconnected', { roomId, playerName: player.name, seatIndex: playerSeatIndex });
+              incrementMetric('player_disconnected');
+            }
+            io.to(`room:${roomId}`).emit('room-state-update', room);
+          }
         }
       } catch (error) {
         // エラーは無視（すでに離席済みの可能性）

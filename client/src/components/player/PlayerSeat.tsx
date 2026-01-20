@@ -3,7 +3,7 @@
 // プレイヤー席コンポーネント（改良版）
 // ========================================
 
-import { memo } from 'react';
+import { memo, useRef, useEffect, useState } from 'react';
 import type { Player } from '../../types/table';
 import { Card } from '../cards/Card';
 import { ChipStack } from '../chips/ChipStack';
@@ -28,77 +28,76 @@ interface PlayerSeatProps {
   timerSeconds?: number;
   maxTimerSeconds?: number;
   handRank?: string; // 役名（自分のハンド用）
-  lastAction?: string; // 最後のアクション
 }
 
 // チップ位置を座席に応じて計算（テーブル中央寄りに配置）
 function getChipPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
-    // 6人テーブル
+    // 6人テーブル - チップをより中央に配置
     switch (seatIndex) {
       case 0: // 下中央 - チップは上（テーブル中央寄り）
-        return { bottom: '100%', marginBottom: 30, left: '50%', transform: 'translateX(-50%)' };
+        return { bottom: '100%', marginBottom: 55, left: '50%', transform: 'translateX(-50%)' };
       case 1: // 左下 - チップは右上（中央寄り）
-        return { bottom: '70%', right: '-20%' };
+        return { bottom: '90%', right: '-70%' };
       case 2: // 左上 - チップは右下（中央寄り）
-        return { top: '70%', right: '-20%' };
+        return { top: '90%', right: '-70%' };
       case 3: // 上中央 - チップは下（テーブル中央寄り）
-        return { top: '100%', marginTop: 30, left: '50%', transform: 'translateX(-50%)' };
+        return { top: '100%', marginTop: 55, left: '50%', transform: 'translateX(-50%)' };
       case 4: // 右上 - チップは左下（中央寄り）
-        return { top: '70%', left: '-20%' };
+        return { top: '90%', left: '-70%' };
       case 5: // 右下 - チップは左上（中央寄り）
-        return { bottom: '70%', left: '-20%' };
+        return { bottom: '90%', left: '-70%' };
       default:
-        return { top: '100%', marginTop: 30 };
+        return { top: '100%', marginTop: 55 };
     }
   } else {
-    // 8人テーブル
+    // 8人テーブル - チップをより中央に配置
     switch (seatIndex) {
       case 0: // 下中央
-        return { bottom: '100%', marginBottom: 30, left: '50%', transform: 'translateX(-50%)' };
+        return { bottom: '100%', marginBottom: 55, left: '50%', transform: 'translateX(-50%)' };
       case 1: // 左下
-        return { bottom: '50%', right: '-25%' };
+        return { bottom: '70%', right: '-60%' };
       case 2: // 左
-        return { top: '50%', right: '-30%', transform: 'translateY(-50%)' };
+        return { top: '50%', right: '-70%', transform: 'translateY(-50%)' };
       case 3: // 左上
-        return { top: '50%', right: '-25%' };
+        return { top: '70%', right: '-60%' };
       case 4: // 上中央
-        return { top: '100%', marginTop: 30, left: '50%', transform: 'translateX(-50%)' };
+        return { top: '100%', marginTop: 55, left: '50%', transform: 'translateX(-50%)' };
       case 5: // 右上
-        return { top: '50%', left: '-25%' };
+        return { top: '70%', left: '-60%' };
       case 6: // 右
-        return { top: '50%', left: '-30%', transform: 'translateY(-50%)' };
+        return { top: '50%', left: '-70%', transform: 'translateY(-50%)' };
       case 7: // 右下
-        return { bottom: '50%', left: '-25%' };
+        return { bottom: '70%', left: '-60%' };
       default:
-        return { top: '100%', marginTop: 30 };
+        return { top: '100%', marginTop: 55 };
     }
   }
 }
 
-// ディーラーボタン位置を座席に応じて計算
+// ディーラーボタン位置を座席に応じて計算（チップと重ならない位置）
 function getDealerButtonPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
     switch (seatIndex) {
-      case 0: return { bottom: '100%', marginBottom: 35, left: '30%' };
-      case 1: return { bottom: '80%', right: '-25%' };
-      case 2: return { top: '80%', right: '-25%' };
-      case 3: return { top: '100%', marginTop: 35, left: '30%' };
-      case 4: return { top: '80%', left: '-25%' };
-      case 5: return { bottom: '80%', left: '-25%' };
-      default: return { top: '100%', marginTop: 35 };
+      case 0: return { bottom: '100%', marginBottom: 25, left: '20%' };
+      case 1: return { bottom: '60%', right: '-35%' };
+      case 2: return { top: '60%', right: '-35%' };
+      case 3: return { top: '100%', marginTop: 25, left: '20%' };
+      case 4: return { top: '60%', left: '-35%' };
+      case 5: return { bottom: '60%', left: '-35%' };
+      default: return { top: '100%', marginTop: 25 };
     }
   } else {
     switch (seatIndex) {
-      case 0: return { bottom: '100%', marginBottom: 35, left: '30%' };
-      case 1: return { bottom: '60%', right: '-30%' };
-      case 2: return { top: '30%', right: '-35%' };
-      case 3: return { top: '60%', right: '-30%' };
-      case 4: return { top: '100%', marginTop: 35, left: '30%' };
-      case 5: return { top: '60%', left: '-30%' };
-      case 6: return { top: '30%', left: '-35%' };
-      case 7: return { bottom: '60%', left: '-30%' };
-      default: return { top: '100%', marginTop: 35 };
+      case 0: return { bottom: '100%', marginBottom: 25, left: '20%' };
+      case 1: return { bottom: '40%', right: '-35%' };
+      case 2: return { top: '20%', right: '-40%' };
+      case 3: return { top: '40%', right: '-35%' };
+      case 4: return { top: '100%', marginTop: 25, left: '20%' };
+      case 5: return { top: '40%', left: '-35%' };
+      case 6: return { top: '20%', left: '-40%' };
+      case 7: return { bottom: '40%', left: '-35%' };
+      default: return { top: '100%', marginTop: 25 };
     }
   }
 }
@@ -122,17 +121,63 @@ export const PlayerSeat = memo(function PlayerSeat({
   timerSeconds,
   maxTimerSeconds = 30,
   handRank,
-  lastAction,
 }: PlayerSeatProps) {
   const isFolded = player?.status === 'FOLDED';
   const isAllIn = player?.status === 'ALL_IN';
 
+  // ベット変化検出用
+  const prevBetRef = useRef(player?.bet ?? 0);
+  const [chipAnimate, setChipAnimate] = useState<'bet' | 'win' | null>(null);
+
+  // ベットが増えた時にアニメーションをトリガー
+  useEffect(() => {
+    const currentBet = player?.bet ?? 0;
+    if (currentBet > prevBetRef.current && currentBet > 0) {
+      setChipAnimate('bet');
+      const timer = setTimeout(() => setChipAnimate(null), 400);
+      prevBetRef.current = currentBet;
+      return () => clearTimeout(timer);
+    }
+    prevBetRef.current = currentBet;
+  }, [player?.bet]);
+
+  // 勝者エフェクト
+  useEffect(() => {
+    if (isWinner) {
+      setChipAnimate('win');
+    } else {
+      setChipAnimate(null);
+    }
+  }, [isWinner]);
+
+  // ホールカード配布アニメーション
+  const prevHoleCardsRef = useRef<string[] | null>(null);
+  const [cardDealAnimate, setCardDealAnimate] = useState(false);
+
+  useEffect(() => {
+    const hadCards = prevHoleCardsRef.current && prevHoleCardsRef.current.length > 0;
+    const hasCards = holeCards && holeCards.length > 0;
+
+    // カードがない状態から持っている状態に変わった時
+    if (!hadCards && hasCards) {
+      setCardDealAnimate(true);
+      const timer = setTimeout(() => setCardDealAnimate(false), 500);
+      prevHoleCardsRef.current = holeCards;
+      return () => clearTimeout(timer);
+    }
+
+    // カードがなくなった時（新しいハンド）
+    if (hadCards && !hasCards) {
+      prevHoleCardsRef.current = null;
+      setCardDealAnimate(false);
+    }
+
+    prevHoleCardsRef.current = holeCards || null;
+  }, [holeCards]);
+
   // ゲームタイプ判定
   const isStudGame = ['7CS', '7CS8', 'RAZZ'].includes(gameVariant);
   const isDrawGame = ['2-7_TD', 'BADUGI'].includes(gameVariant);
-
-  // 上部プレイヤー判定（カードを下に配置するため）
-  const isTopSeat = maxPlayers === 6 ? seatIndex === 3 : seatIndex === 4;
 
   // 空席
   if (!player) {
@@ -241,15 +286,12 @@ export const PlayerSeat = memo(function PlayerSeat({
       )}
 
       {/* カード表示（ネームタグの上に重なる） - 非Studゲーム用 */}
-      {/* 上部プレイヤー(seat3/4)はカードを下に配置してヘッダーと重ならないように */}
+      {/* 全プレイヤー共通でカードはネームタグの上に配置 */}
       {!isStudGame && !isFolded && (displayCards || showFaceDown) && (
         <div
           style={{
             position: 'absolute',
-            // 上部プレイヤーはカードを下に配置
-            ...(isTopSeat
-              ? { top: '100%', marginTop: 8 }
-              : { bottom: isDrawGame ? '65%' : '55%' }),
+            bottom: isDrawGame ? '65%' : '55%',
             display: 'flex',
             gap: isDrawGame ? -6 : -8,
             zIndex: 10,
@@ -266,6 +308,7 @@ export const PlayerSeat = memo(function PlayerSeat({
                     ? `translateX(${i * -1}px)`
                     : `rotate(${(i - (displayCards.length - 1) / 2) * 5}deg)`,
                   zIndex: i,
+                  animation: cardDealAnimate && isYou ? `cardDealIn 0.4s ease-out ${i * 0.1}s both` : undefined,
                 }}
               >
                 <Card card={card} size="small" />
@@ -281,6 +324,7 @@ export const PlayerSeat = memo(function PlayerSeat({
                     ? `translateX(${i * -1}px)`
                     : `rotate(${(i - 0.5) * 5}deg)`,
                   zIndex: i,
+                  animation: cardDealAnimate ? `cardDealIn 0.4s ease-out ${i * 0.1}s both` : undefined,
                 }}
               >
                 <Card card="" size="small" faceDown />
@@ -295,7 +339,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            ...(isTopSeat ? { top: '100%', marginTop: 8 } : { bottom: '55%' }),
+            bottom: '55%',
             display: 'flex',
             gap: -8,
             zIndex: 10,
@@ -321,7 +365,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            ...(isTopSeat ? { top: '100%', marginTop: 8 } : { bottom: '55%' }),
+            bottom: '55%',
             display: 'flex',
             gap: -8,
             zIndex: 10,
@@ -346,9 +390,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            ...(isTopSeat
-              ? { top: '130%', marginTop: 8 }
-              : { bottom: '85%' }),
+            bottom: '85%',
             left: '50%',
             display: 'flex',
             transform: 'translateX(-50%)',
@@ -540,10 +582,8 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            top: isTopSeat ? undefined : '100%',
-            bottom: isTopSeat ? '100%' : undefined,
-            marginTop: isTopSeat ? undefined : 4,
-            marginBottom: isTopSeat ? 4 : undefined,
+            top: '100%',
+            marginTop: 4,
             left: '50%',
             transform: 'translateX(-50%)',
             padding: '2px 8px',
@@ -569,9 +609,27 @@ export const PlayerSeat = memo(function PlayerSeat({
             zIndex: 20,
           }}
         >
-          <ChipStack amount={player.bet} />
+          <ChipStack amount={player.bet} animate={chipAnimate} />
         </div>
       )}
+
+      {/* アニメーション用keyframes */}
+      <style>{`
+        @keyframes cardDealIn {
+          0% {
+            opacity: 0;
+            transform: scale(0.3) translateY(-40px) rotate(-15deg);
+          }
+          60% {
+            opacity: 1;
+            transform: scale(1.05) translateY(5px) rotate(2deg);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1) translateY(0) rotate(0deg);
+          }
+        }
+      `}</style>
     </div>
   );
 });

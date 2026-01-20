@@ -42,12 +42,16 @@ function createRoom(players: (Player | null)[]): Room {
         players,
         dealerBtnIndex: 0,
         activePlayerIndex: 0,
+        streetStarterIndex: 0,
         gameState: {
             status: 'WAITING' as any,
+            street: 0,
             board: [],
             pot: { main: 0, side: [] },
+            deckStatus: { stubCount: 0, burnCount: 0 },
             currentBet: 0,
             minRaise: 10,
+            raisesThisRound: 0,
             deck: [],
             handNumber: 1,
             gameVariant: 'NLH'
@@ -58,7 +62,12 @@ function createRoom(players: (Player | null)[]): Room {
             currentGameIndex: 0,
             handsPerGame: 8
         },
-        lastAggressorIndex: -1
+        metaGame: {
+            standUp: { isActive: false, remainingPlayers: [] },
+            sevenDeuce: false
+        },
+        lastAggressorIndex: -1,
+        createdAt: Date.now()
     };
 }
 
@@ -244,6 +253,26 @@ describe('Dealer - Button and Blinds (B-04)', () => {
         expect(bbIndex).toBe(1);
     });
 
+    it('collectBlinds: BB待ちのプレイヤーはBB支払いで参加状態に戻る', () => {
+        const players = [
+            createPlayer('p0', 'Player0', 100),
+            createPlayer('p1', 'Player1', 0),
+            createPlayer('p2', 'Player2', 100)
+        ];
+        const room = createRoom(players);
+        room.dealerBtnIndex = 0;
+
+        const bbPlayer = players[2]!;
+        bbPlayer.status = 'SIT_OUT';
+        bbPlayer.waitingForBB = true;
+        bbPlayer.pendingJoin = true;
+
+        dealer.collectBlinds(room);
+
+        expect(bbPlayer.waitingForBB).toBe(false);
+        expect(bbPlayer.pendingJoin).toBe(false);
+    });
+
     it('collectBlinds: ショートスタックは全額ブラインド', () => {
         const players = [
             createPlayer('p0', 'Player0', 100),
@@ -372,6 +401,49 @@ describe('Dealer - Stud Street Dealing (V-ST2)', () => {
 
         // アップカードは増えない（ダウンカード）
         expect(players[0]!.studUpCards!.length).toBe(4);
+    });
+});
+
+describe('Dealer - Stud Action Order (V-ST2)', () => {
+    const dealer = new Dealer();
+
+    it('getStudActionStartIndex: high games use strongest upcards', () => {
+        const players = [
+            createPlayer('p0', 'Player0', 100, ['A♠', 'K♠', 'Q♠'], 'ACTIVE', ['A♠', 'K♠', 'Q♠']),
+            createPlayer('p1', 'Player1', 100, ['K♦', 'J♦', '9♦'], 'ACTIVE', ['K♦', 'J♦', '9♦']),
+            createPlayer('p2', 'Player2', 100, ['Q♣', 'T♣', '8♣'], 'ACTIVE', ['Q♣', 'T♣', '8♣']),
+        ];
+        const room = createRoom(players);
+        room.dealerBtnIndex = 0;
+
+        const startIndex = dealer.getStudActionStartIndex(room, false);
+        expect(startIndex).toBe(0);
+    });
+
+    it('getStudActionStartIndex: razz uses weakest upcards', () => {
+        const players = [
+            createPlayer('p0', 'Player0', 100, ['A♠', 'K♠', 'Q♠'], 'ACTIVE', ['A♠', 'K♠', 'Q♠']),
+            createPlayer('p1', 'Player1', 100, ['2♦', '4♦', '7♦'], 'ACTIVE', ['2♦', '4♦', '7♦']),
+            createPlayer('p2', 'Player2', 100, ['3♣', '5♣', '6♣'], 'ACTIVE', ['3♣', '5♣', '6♣']),
+        ];
+        const room = createRoom(players);
+        room.dealerBtnIndex = 2;
+
+        const startIndex = dealer.getStudActionStartIndex(room, true);
+        expect(startIndex).toBe(1);
+    });
+
+    it('getStudActionStartIndex: ties resolve left of dealer', () => {
+        const players = [
+            createPlayer('p0', 'Player0', 100, ['K♠', 'Q♠', 'J♠'], 'ACTIVE', ['K♠', 'Q♠', 'J♠']),
+            createPlayer('p1', 'Player1', 100, ['K♦', 'Q♦', 'J♦'], 'ACTIVE', ['K♦', 'Q♦', 'J♦']),
+            createPlayer('p2', 'Player2', 100, ['9♣', '8♣', '7♣'], 'ACTIVE', ['9♣', '8♣', '7♣']),
+        ];
+        const room = createRoom(players);
+        room.dealerBtnIndex = 2;
+
+        const startIndex = dealer.getStudActionStartIndex(room, false);
+        expect(startIndex).toBe(0);
     });
 });
 

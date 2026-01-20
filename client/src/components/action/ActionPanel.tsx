@@ -337,23 +337,38 @@ export const ActionPanel = memo(function ActionPanel({
               border: '1px solid #374151',
             }}
           >
-            <span style={{ color: '#9ca3af', fontSize: 12, fontWeight: 'bold' }}>Bet</span>
-            <input
-              type="range"
-              min={minRaise || 0}
-              max={maxBet || 100}
-              value={betAmount}
-              onChange={(e) => handleBetChange(Number(e.target.value))}
-              disabled={!isYourTurn || !canBetOrRaise}
-              style={{
-                width: 100,
-                height: 6,
-                background: '#374151',
-                borderRadius: 4,
-                cursor: 'pointer',
-                accentColor: '#3b82f6',
-              }}
-            />
+            <span style={{ color: '#9ca3af', fontSize: 12, fontWeight: 'bold' }}>
+              {validActions.includes('BET') ? 'Bet' : 'Raise'}
+            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <input
+                type="range"
+                min={minRaise || 0}
+                max={maxBet || 100}
+                value={betAmount}
+                onChange={(e) => handleBetChange(Number(e.target.value))}
+                disabled={!isYourTurn || !canBetOrRaise}
+                style={{
+                  width: 110,
+                  height: 6,
+                  background: '#374151',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  accentColor: '#3b82f6',
+                }}
+              />
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: 10,
+                  color: '#6b7280',
+                }}
+              >
+                <span>Min ${minRaise.toLocaleString()}</span>
+                <span>Max ${maxBet.toLocaleString()}</span>
+              </div>
+            </div>
             <div
               style={{
                 color: '#ffffff',
@@ -417,7 +432,7 @@ export const ActionPanel = memo(function ActionPanel({
                 'raise'
               )}
             >
-              {validActions.includes('BET') ? 'Bet' : 'Raise'} ${betAmount.toLocaleString()}
+              {validActions.includes('BET') ? 'Bet' : 'Raise to'} ${betAmount.toLocaleString()}
             </button>
           )}
 
@@ -431,7 +446,7 @@ export const ActionPanel = memo(function ActionPanel({
                 'raise'
               )}
             >
-              {validActions.includes('BET') ? 'Bet' : 'Raise'} ${((currentBet || 0) + (fixedBetSize || 0)).toLocaleString()}
+              {validActions.includes('BET') ? 'Bet' : 'Raise to'} ${((currentBet || 0) + (fixedBetSize || 0)).toLocaleString()}
             </button>
           )}
 

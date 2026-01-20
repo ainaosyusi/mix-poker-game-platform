@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { ShowdownManager } from './ShowdownManager.ts';
-import type { Room, Player, PlayerStatus, GameVariant } from './types.ts';
+import { ShowdownManager } from './ShowdownManager.js';
+import type { Room, Player, PlayerStatus, GameVariant } from './types.js';
 
 // Helper: テスト用プレイヤー作成
 function createPlayer(
@@ -47,12 +47,16 @@ function createRoom(
         players,
         dealerBtnIndex: 0,
         activePlayerIndex: 0,
+        streetStarterIndex: 0,
         gameState: {
             status: 'SHOWDOWN' as any,
+            street: 4,
             board,
             pot: { main: mainPot, side: sidePots },
+            deckStatus: { stubCount: 0, burnCount: 0 },
             currentBet: 0,
             minRaise: 10,
+            raisesThisRound: 0,
             deck: [],
             handNumber: 1,
             gameVariant: variant
@@ -63,7 +67,12 @@ function createRoom(
             currentGameIndex: 0,
             handsPerGame: 8
         },
-        lastAggressorIndex: -1
+        metaGame: {
+            standUp: { isActive: false, remainingPlayers: [] },
+            sevenDeuce: false
+        },
+        lastAggressorIndex: -1,
+        createdAt: Date.now()
     };
 }
 
@@ -266,6 +275,51 @@ describe('ShowdownManager - Hi-Lo Games (V-PLO8, V-7CS8)', () => {
 
         // Both players should win something (high and low split)
         expect(result.winners.length).toBeGreaterThan(0);
+    });
+
+    it('7CS8: サイドポットでもハイ/ロー分配', () => {
+        const playerA = createPlayer(
+            'A',
+            'PlayerA',
+            0,
+            ['A♠', 'A♥', 'A♦', 'K♣', 'Q♣', 'J♣', '9♦'],
+            'ALL_IN',
+            50
+        );
+        const playerB = createPlayer(
+            'B',
+            'PlayerB',
+            0,
+            ['2♠', '3♥', '4♦', '5♣', '7♣', '9♥', 'K♦'],
+            'ACTIVE',
+            100
+        );
+        const playerC = createPlayer(
+            'C',
+            'PlayerC',
+            0,
+            ['9♠', '9♥', 'K♦', 'Q♣', 'J♣', '8♦', '7♠'],
+            'ACTIVE',
+            100
+        );
+
+        const room = createRoom(
+            [playerA, playerB, playerC],
+            [],
+            '7CS8',
+            150,
+            [{ amount: 100, eligiblePlayers: ['B', 'C'] }]
+        );
+
+        const result = showdownManager.executeShowdown(room);
+
+        const aWinner = result.winners.find(w => w.playerId === 'A');
+        const bWinner = result.winners.find(w => w.playerId === 'B');
+        const cWinner = result.winners.find(w => w.playerId === 'C');
+
+        expect(aWinner?.amount).toBe(75);
+        expect(bWinner?.amount).toBe(125);
+        expect(cWinner?.amount).toBe(50);
     });
 });
 

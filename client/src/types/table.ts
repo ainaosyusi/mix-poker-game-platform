@@ -12,6 +12,10 @@ export interface Player {
   status: 'ACTIVE' | 'FOLDED' | 'ALL_IN' | 'SIT_OUT';
   hand?: string[] | null;
   studUpCards?: string[];  // Stud games: public up cards
+  waitingForBB?: boolean;
+  pendingJoin?: boolean;
+  pendingSitOut?: boolean;
+  disconnected?: boolean;
 }
 
 // ゲーム状態
@@ -45,6 +49,15 @@ export interface RotationState {
   currentGameIndex: number;
 }
 
+// メタゲーム状態
+export interface MetaGameState {
+  standUp: {
+    isActive: boolean;
+    remainingPlayers: string[];
+  };
+  sevenDeuce: boolean;
+}
+
 // 部屋情報
 export interface Room {
   id: string;
@@ -55,6 +68,7 @@ export interface Room {
   activePlayerIndex: number;
   streetStarterIndex: number;
   rotation: RotationState;
+  metaGame: MetaGameState;
 }
 
 // アクションタイプ
@@ -101,6 +115,7 @@ export interface TableProps {
   socket: any; // Socket型はsocket.io-clientからインポート
   roomId: string;
   initialRoomData: Room | null;
+  initialHand?: string[] | null;
   yourSocketId: string;
   onLeaveRoom: () => void;
 }

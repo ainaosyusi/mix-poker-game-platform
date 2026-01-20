@@ -3,7 +3,7 @@
 // カジノ風ロビー画面
 // ========================================
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Socket } from 'socket.io-client';
 
 interface RoomListItem {
@@ -27,7 +27,7 @@ interface RoomConfig {
 interface LobbyProps {
   socket: Socket | null;
   playerName: string;
-  onJoinRoom: (roomId: string, roomData?: any) => void;
+  onJoinRoom: (roomId: string, roomData?: any, yourHand?: string[] | null) => void;
 }
 
 // ゲームバリアントの表示名
@@ -57,6 +57,7 @@ export function Lobby({ socket, playerName, onJoinRoom }: LobbyProps) {
     buyInMax: 1000,
     allowedGames: ['NLH'],
   });
+  const didAutoJoin = useRef(false);
 
   useEffect(() => {
     if (!socket) return;
@@ -72,13 +73,15 @@ export function Lobby({ socket, playerName, onJoinRoom }: LobbyProps) {
     // 部屋作成成功
     socket.on('room-created', (data: { room: any; yourSocketId: string }) => {
       console.log('✅ Room created:', data.room.id);
-      socket.emit('join-room', { roomId: data.room.id, playerName });
+      const resumeToken = localStorage.getItem(`mgp-resume-${data.room.id}`) || undefined;
+      socket.emit('join-room', { roomId: data.room.id, playerName, resumeToken });
     });
 
     // 部屋参加成功 - テーブルに遷移
-    socket.on('room-joined', (data: { room: any; yourSocketId: string }) => {
+    socket.on('room-joined', (data: { room: any; yourSocketId: string; yourHand?: string[] | null }) => {
       console.log('✅ Joined room:', data.room.id);
-      onJoinRoom(data.room.id, data.room);
+      localStorage.setItem('mgp-last-room', data.room.id);
+      onJoinRoom(data.room.id, data.room, data.yourHand || null);
     });
 
     // エラーハンドリング
@@ -94,6 +97,15 @@ export function Lobby({ socket, playerName, onJoinRoom }: LobbyProps) {
       socket.off('error');
     };
   }, [socket, onJoinRoom, playerName]);
+
+  useEffect(() => {
+    if (!socket || !playerName || didAutoJoin.current) return;
+    const lastRoomId = localStorage.getItem('mgp-last-room');
+    if (!lastRoomId) return;
+    const resumeToken = localStorage.getItem(`mgp-resume-${lastRoomId}`) || undefined;
+    didAutoJoin.current = true;
+    socket.emit('join-room', { roomId: lastRoomId, playerName, resumeToken });
+  }, [socket, playerName]);
 
   const handleCreateRoom = () => {
     if (!socket || !playerName) return;
@@ -111,13 +123,15 @@ export function Lobby({ socket, playerName, onJoinRoom }: LobbyProps) {
 
   const handleJoinRoom = (roomId: string) => {
     if (!socket || !playerName) return;
-    socket.emit('join-room', { roomId, playerName });
+    const resumeToken = localStorage.getItem(`mgp-resume-${roomId}`) || undefined;
+    socket.emit('join-room', { roomId, playerName, resumeToken });
   };
 
   // プライベート部屋に参加
   const handleJoinPrivateRoom = () => {
     if (!socket || !playerName || privateRoomId.length !== 6) return;
-    socket.emit('join-room', { roomId: privateRoomId, playerName });
+    const resumeToken = localStorage.getItem(`mgp-resume-${privateRoomId}`) || undefined;
+    socket.emit('join-room', { roomId: privateRoomId, playerName, resumeToken });
   };
 
   return (

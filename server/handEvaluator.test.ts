@@ -14,7 +14,7 @@ import {
     compareBadugiHands,
     evaluateDeuceSeven,
     compareDeuceSeven
-} from './handEvaluator.ts';
+} from './handEvaluator.js';
 
 // Helper: カード文字列をCardオブジェクトに変換
 function parseCard(str: string): { suit: string; rank: string } {

@@ -4,6 +4,7 @@
  */
 
 import type { Room, Player, ActionType, ActionValidation } from './types.js';
+import { getVariantConfig } from './gameVariants.js';
 
 export class ActionValidator {
     /**
@@ -106,34 +107,35 @@ export class ActionValidator {
         const currentBet = room.gameState.currentBet;
         const playerBet = player.bet;
         const stack = player.stack;
+        const variantConfig = getVariantConfig(room.gameState.gameVariant);
 
-        // FOLDは常に可能
-        actions.push('FOLD');
+        const callAmount = Math.max(0, currentBet - playerBet);
 
-        // CHECK: 現在のベットと同額以上払っている場合
         if (playerBet >= currentBet) {
             actions.push('CHECK');
-        }
-
-        // CALL: 現在のベットが自分より高い場合
-        if (currentBet > playerBet && stack > 0) {
+        } else {
+            actions.push('FOLD');
             actions.push('CALL');
         }
 
-        // BET: まだ誰もベットしていない場合
-        if (currentBet === 0 && stack > 0) {
-            actions.push('BET');
+        const otherActivePlayers = room.players.filter(p =>
+            p !== null && p.socketId !== player.socketId && p.status === 'ACTIVE'
+        );
+
+        const canAffordRaise = stack > callAmount;
+        const isCapped = variantConfig.betStructure === 'fixed' &&
+            room.gameState.raisesThisRound >= this.getCapLimit(room);
+        const canRaise = canAffordRaise && !isCapped && otherActivePlayers.length > 0;
+
+        if (canRaise) {
+            if (currentBet === 0) {
+                actions.push('BET');
+            } else {
+                actions.push('RAISE');
+            }
         }
 
-        // RAISE: 他者がベットしていて、自分がさらに上乗せできる場合
-        if (currentBet > 0 && stack > currentBet - playerBet) {
-            actions.push('RAISE');
-        }
-
-        // ALL_IN: No-Limitのみ（スタックがあれば可能）
-        // Note: この関数は旧バージョン互換のため残していますが、
-        // GameEngine.getValidActionsの方を優先して使用してください
-        if (stack > 0) {
+        if (variantConfig.betStructure === 'no-limit' && stack > 0 && callAmount < stack) {
             actions.push('ALL_IN');
         }
 
@@ -145,15 +147,19 @@ export class ActionValidator {
      */
     getMinBet(room: Room, player: Player): number {
         const currentBet = room.gameState.currentBet;
+        const variantConfig = getVariantConfig(room.gameState.gameVariant);
         const minRaise = room.gameState.minRaise;
 
-        if (currentBet === 0) {
-            // 最初のベット: ビッグブラインド以上
-            return room.config.bigBlind;
-        } else {
-            // レイズ: 現在のベット + 最小レイズ額
-            return currentBet - player.bet + minRaise;
+        if (variantConfig.betStructure === 'fixed') {
+            const fixedBetSize = this.getFixedBetSize(room);
+            return currentBet === 0
+                ? fixedBetSize
+                : currentBet - player.bet + fixedBetSize;
         }
+
+        return currentBet === 0
+            ? room.config.bigBlind
+            : currentBet - player.bet + minRaise;
     }
 
     /**
@@ -164,5 +170,44 @@ export class ActionValidator {
             room.gameState.currentBet - player.bet,
             player.stack
         );
+    }
+
+    private getFixedBetSize(room: Room): number {
+        const smallBet = room.config.bigBlind;
+        const bigBet = smallBet * 2;
+        const phase = room.gameState.status;
+        const variantConfig = getVariantConfig(room.gameState.gameVariant);
+
+        if (variantConfig.communityCardType === 'stud') {
+            if (phase === 'FIFTH_STREET' || phase === 'SIXTH_STREET' || phase === 'SEVENTH_STREET') {
+                return bigBet;
+            }
+            return smallBet;
+        }
+
+        if (variantConfig.hasDrawPhase) {
+            if (phase === 'SECOND_DRAW' || phase === 'THIRD_DRAW') {
+                return bigBet;
+            }
+            return smallBet;
+        }
+
+        if (phase === 'TURN' || phase === 'RIVER') {
+            return bigBet;
+        }
+
+        return smallBet;
+    }
+
+    private getCapLimit(room: Room): number {
+        const activePlayers = room.players.filter(p =>
+            p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
+        ).length;
+
+        if (activePlayers === 2) {
+            return 99;
+        }
+
+        return 4;
     }
 }

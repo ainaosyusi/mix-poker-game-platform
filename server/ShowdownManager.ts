@@ -432,9 +432,6 @@ export class ShowdownManager {
      * 注: Hi-Loでは、HighまたはLowのいずれかで勝てる場合にShow。両方で負ける場合のみMuck。
      */
     private executeHiLoShowdown(room: Room, players: Player[], board: string[]): ShowdownResult {
-        const totalPot = room.gameState.pot.main +
-            room.gameState.pot.side.reduce((sum, s) => sum + s.amount, 0);
-
         const variant = room.gameState.gameVariant;
         const isPLO8 = variant === 'PLO8';
         const isAllInShowdown = this.hasAllInPlayer(room);
@@ -470,69 +467,100 @@ export class ShowdownManager {
             return { player, bestLowFive, lowResult, handRank: lowResult.name };
         }).filter(e => e.lowResult.valid);
 
-        const winners: ShowdownResult['winners'] = [];
+        const winnersMap = new Map<string, { player: Player; amount: number; highRank?: string; lowRank?: string }>();
 
-        // ローの勝者がいるかチェック
-        const hasLowWinner = lowEvaluations.length > 0;
-        const highPot = hasLowWinner ? Math.floor(totalPot / 2) : totalPot;
-        const lowPot = hasLowWinner ? totalPot - highPot : 0;
-
-        // ハイの勝者
-        let bestHighEval = highEvaluations[0];
-        for (const e of highEvaluations) {
-            if (compareHands(e.bestFive, bestHighEval.bestFive) > 0) {
-                bestHighEval = e;
+        const addWinnings = (player: Player, amount: number, side: 'high' | 'low', handRank: string) => {
+            if (amount <= 0) return;
+            const existing = winnersMap.get(player.socketId);
+            if (existing) {
+                existing.amount += amount;
+                if (side === 'high') existing.highRank = handRank;
+                if (side === 'low') existing.lowRank = handRank;
+            } else {
+                winnersMap.set(player.socketId, {
+                    player,
+                    amount,
+                    highRank: side === 'high' ? handRank : undefined,
+                    lowRank: side === 'low' ? handRank : undefined
+                });
             }
-        }
-        const highWinners = highEvaluations.filter(e =>
-            compareHands(e.bestFive, bestHighEval.bestFive) === 0
-        );
+        };
 
-        const highShare = Math.floor(highPot / highWinners.length);
-        for (const w of highWinners) {
-            w.player.stack += highShare;
-            winners.push({
-                playerId: w.player.socketId,
-                playerName: w.player.name,
-                hand: [...w.player.hand!],  // 深いコピー
-                handRank: `High: ${w.handRank}`,
-                amount: highShare
-            });
-        }
+        const allEligibleIds = highEvaluations.map(e => e.player.socketId);
+        const potSlices = [
+            { amount: room.gameState.pot.main, eligiblePlayers: allEligibleIds },
+            ...room.gameState.pot.side.map(p => ({ amount: p.amount, eligiblePlayers: p.eligiblePlayers }))
+        ];
 
-        // ローの勝者
-        if (hasLowWinner) {
-            let bestLowEval = lowEvaluations[0];
-            for (const e of lowEvaluations) {
-                if (compareLowHands(e.lowResult, bestLowEval.lowResult) > 0) {
-                    bestLowEval = e;
+        for (const pot of potSlices) {
+            if (pot.amount <= 0) continue;
+
+            const eligibleHigh = highEvaluations.filter(e =>
+                pot.eligiblePlayers.includes(e.player.socketId)
+            );
+            if (eligibleHigh.length === 0) continue;
+
+            let bestHighEval = eligibleHigh[0];
+            for (const e of eligibleHigh) {
+                if (compareHands(e.bestFive, bestHighEval.bestFive) > 0) {
+                    bestHighEval = e;
                 }
             }
-            const lowWinners = lowEvaluations.filter(e =>
-                compareLowHands(e.lowResult, bestLowEval.lowResult) === 0
+            const highWinners = eligibleHigh.filter(e =>
+                compareHands(e.bestFive, bestHighEval.bestFive) === 0
             );
 
-            const lowShare = Math.floor(lowPot / lowWinners.length);
-            for (const w of lowWinners) {
-                w.player.stack += lowShare;
-                // 既にハイで勝った場合は金額を追加
-                const existing = winners.find(win => win.playerId === w.player.socketId);
-                if (existing) {
-                    existing.amount += lowShare;
-                    existing.handRank += ` / Low: ${w.handRank}`;
-                } else {
-                    winners.push({
-                        playerId: w.player.socketId,
-                        playerName: w.player.name,
-                        hand: [...w.player.hand!],  // 深いコピー
-                        handRank: `Low: ${w.handRank}`,
-                        amount: lowShare
-                    });
+            const eligibleLow = lowEvaluations.filter(e =>
+                pot.eligiblePlayers.includes(e.player.socketId)
+            );
+
+            const hasLowWinner = eligibleLow.length > 0;
+            const highPot = hasLowWinner ? Math.floor(pot.amount / 2) : pot.amount;
+            const lowPot = hasLowWinner ? pot.amount - highPot : 0;
+
+            const highShare = Math.floor(highPot / highWinners.length);
+            const highRemainder = highPot % highWinners.length;
+            highWinners.forEach((w, i) => {
+                const amount = highShare + (i < highRemainder ? 1 : 0);
+                w.player.stack += amount;
+                addWinnings(w.player, amount, 'high', w.handRank);
+            });
+
+            if (hasLowWinner) {
+                let bestLowEval = eligibleLow[0];
+                for (const e of eligibleLow) {
+                    if (compareLowHands(e.lowResult, bestLowEval.lowResult) > 0) {
+                        bestLowEval = e;
+                    }
                 }
+                const lowWinners = eligibleLow.filter(e =>
+                    compareLowHands(e.lowResult, bestLowEval.lowResult) === 0
+                );
+
+                const lowShare = Math.floor(lowPot / lowWinners.length);
+                const lowRemainder = lowPot % lowWinners.length;
+                lowWinners.forEach((w, i) => {
+                    const amount = lowShare + (i < lowRemainder ? 1 : 0);
+                    w.player.stack += amount;
+                    addWinnings(w.player, amount, 'low', w.handRank);
+                });
             }
         }
 
         room.gameState.pot = { main: 0, side: [] };
+
+        const winners: ShowdownResult['winners'] = Array.from(winnersMap.values()).map(w => {
+            const rankParts: string[] = [];
+            if (w.highRank) rankParts.push(`High: ${w.highRank}`);
+            if (w.lowRank) rankParts.push(`Low: ${w.lowRank}`);
+            return {
+                playerId: w.player.socketId,
+                playerName: w.player.name,
+                hand: [...w.player.hand!],  // 深いコピー
+                handRank: rankParts.join(' / '),
+                amount: w.amount
+            };
+        });
 
         // 勝者のIDセット
         const winnerIds = new Set(winners.map(w => w.playerId));
@@ -541,15 +569,15 @@ export class ShowdownManager {
         const allHands = highEvaluations.map(e => {
             const isWinner = winnerIds.has(e.player.socketId);
             const lowEval = lowEvaluations.find(le => le.player.socketId === e.player.socketId);
-            const rankStr = isWinner
+            const rankStr = isWinner || isAllInShowdown
                 ? (lowEval ? `High: ${e.handRank} / Low: ${lowEval.handRank}` : `High: ${e.handRank}`)
                 : 'Mucked';
             return {
                 playerId: e.player.socketId,
                 playerName: e.player.name,
-                hand: isWinner ? [...e.player.hand!] : null,  // 深いコピー
+                hand: (isWinner || isAllInShowdown) ? [...e.player.hand!] : null,  // 深いコピー
                 handRank: rankStr,
-                isMucked: !isWinner
+                isMucked: !(isWinner || isAllInShowdown)
             };
         });
 

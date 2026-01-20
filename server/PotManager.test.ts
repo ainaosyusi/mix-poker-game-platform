@@ -181,7 +181,7 @@ describe('PotManager - Side Pot Calculation (SP-01~SP-05)', () => {
     });
 
     describe('SP-05: 複雑なシナリオ', () => {
-        it('フォールドプレイヤーはポット計算から除外', () => {
+        it('フォールドプレイヤーのベットはポットに含まれる', () => {
             const players = [
                 createPlayer('A', 50, 50, 'FOLDED'), // Folded
                 createPlayer('B', 0, 100, 'ACTIVE'),
@@ -190,9 +190,9 @@ describe('PotManager - Side Pot Calculation (SP-01~SP-05)', () => {
 
             const pots = potManager.calculatePots(players);
 
-            // Only B and C contribute to pot calculation
-            // Main: 100 x 2 = 200
-            expect(pots.main).toBe(200);
+            // Folded chips stay in the pot
+            // Main: 50 + 100 + 100 = 250
+            expect(pots.main).toBe(250);
             expect(pots.side.length).toBe(0);
         });
 

@@ -30,6 +30,10 @@ const GAME_VARIANT_NAMES: Record<string, string> = {
   RAZZ: 'Razz',
   BADUGI: 'Badugi',
 };
+const DRAW_MAX_BY_VARIANT: Record<string, number> = {
+  '2-7_TD': 5,
+  BADUGI: 4,
+};
 
 function getGameVariantFullName(variantId: string): string {
   return GAME_VARIANT_NAMES[variantId] || variantId;
@@ -39,6 +43,7 @@ interface TableProps {
   socket: Socket | null;
   roomId: string;
   initialRoomData: Room | null;
+  initialHand?: string[] | null;
   yourSocketId: string;
   onLeaveRoom: () => void;
 }
@@ -47,13 +52,14 @@ export function Table({
   socket,
   roomId,
   initialRoomData,
+  initialHand = null,
   yourSocketId,
   onLeaveRoom
 }: TableProps) {
   const [room, setRoom] = useState<Room | null>(initialRoomData);
   const [buyInAmount, setBuyInAmount] = useState(500);
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
-  const [yourHand, setYourHand] = useState<string[]>([]);
+  const [yourHand, setYourHand] = useState<string[]>(initialHand || []);
   const [isYourTurn, setIsYourTurn] = useState(false);
   const [validActions, setValidActions] = useState<ActionType[]>([]);
   const [showdownResult, setShowdownResult] = useState<ShowdownResult | null>(null);
@@ -71,6 +77,7 @@ export function Table({
   const [showSettings, setShowSettings] = useState(false);
   const [rebuyAmount, setRebuyAmount] = useState(500);
   const [showRebuyDialog, setShowRebuyDialog] = useState(false);
+  const [actionToken, setActionToken] = useState<string | null>(null);
 
   // Draw game用state
   const [isDrawPhase, setIsDrawPhase] = useState(false);
@@ -89,13 +96,14 @@ export function Table({
     rotationEnabled: false,
     rotationGames: ['NLH', 'PLO'],
     handsPerGame: 8,
-    sevenDeuceEnabled: false,
   });
 
   // タイマー関連state
   const [timerSeconds, setTimerSeconds] = useState<number | undefined>(undefined);
   const [timeBankChips, setTimeBankChips] = useState(5);
   const maxTimerSeconds = 30;
+  const maxDrawCount = room ? (DRAW_MAX_BY_VARIANT[room.gameState.gameVariant] || 5) : 5;
+  const isDev = import.meta.env.DEV;
 
   // ログを追加するヘルパー
   const addLog = useCallback((entry: LogEntry) => {
@@ -130,6 +138,7 @@ export function Table({
       isCapped?: boolean;
       raisesRemaining?: number;
       fixedBetSize?: number;
+      actionToken?: string;
     }) => {
       setIsYourTurn(true);
       setValidActions(data.validActions);
@@ -142,6 +151,7 @@ export function Table({
         raisesRemaining: data.raisesRemaining ?? 4,
         fixedBetSize: data.fixedBetSize,
       });
+      setActionToken(data.actionToken || null);
       // タイマー開始
       setTimerSeconds(maxTimerSeconds);
     });
@@ -176,6 +186,9 @@ export function Table({
       if (data.reason === 'Not your turn') {
         console.log('⏰ サーバーが自動アクションを処理済み');
         return;
+      }
+      if (data.reason === 'Invalid action token' || data.reason === 'Action token expired' || data.reason === 'Room is processing another action') {
+        socket.emit('request-room-state');
       }
       // その他のエラーは表示
       console.warn(`無効なアクション: ${data.reason}`);
@@ -256,7 +269,7 @@ export function Table({
       socket.off('timer-update');
       socket.off('timebank-update');
     };
-  }, [socket]);
+  }, [socket, actionToken]);
 
   // タイマーカウントダウン
   useEffect(() => {
@@ -306,13 +319,23 @@ export function Table({
     }
   }, [room?.gameState]);
 
+  useEffect(() => {
+    if (!room) return;
+    const seatIndex = room.players.findIndex(p => p?.socketId === yourSocketId);
+    if (seatIndex === -1) return;
+    const player = room.players[seatIndex];
+    if (player?.hand && player.hand.length > 0 && yourHand.length === 0) {
+      setYourHand(player.hand);
+    }
+  }, [room, yourSocketId, yourHand.length]);
+
   // アクション実行
   const handleAction = useCallback((type: ActionType, amount?: number) => {
     if (!socket) return;
-    socket.emit('player-action', { type, amount });
+    socket.emit('player-action', { type, amount, actionToken });
     setIsYourTurn(false);
     setTimerSeconds(undefined);
-  }, [socket]);
+  }, [socket, actionToken]);
 
   // タイムバンク使用
   const handleUseTimeBank = useCallback(() => {
@@ -328,10 +351,13 @@ export function Table({
       if (prev.includes(index)) {
         return prev.filter(i => i !== index);
       } else {
+        if (prev.length >= maxDrawCount) {
+          return prev;
+        }
         return [...prev, index];
       }
     });
-  }, []);
+  }, [maxDrawCount]);
 
   // ドロー実行
   const handleDraw = useCallback(() => {
@@ -348,16 +374,29 @@ export function Table({
   // 着席
   const handleSitDown = useCallback((seatIndex: number) => {
     if (!socket || !room) return;
-    socket.emit('sit-down', { seatIndex, buyIn: buyInAmount });
+    let resumeToken = localStorage.getItem(`mgp-resume-${roomId}`);
+    if (!resumeToken) {
+      resumeToken = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+      localStorage.setItem(`mgp-resume-${roomId}`, resumeToken);
+    }
+    socket.emit('sit-down', { seatIndex, buyIn: buyInAmount, resumeToken });
     setSelectedSeat(null);
-  }, [socket, room, buyInAmount]);
+  }, [socket, room, buyInAmount, roomId]);
 
   // 離席
   const handleLeaveRoom = useCallback(() => {
     if (!socket) return;
     socket.emit('leave-room');
+    localStorage.removeItem('mgp-last-room');
     onLeaveRoom();
   }, [socket, onLeaveRoom]);
+
+  const handleToggleSitOut = useCallback(() => {
+    if (!socket || !room) return;
+    const player = room.players.find(p => p?.socketId === yourSocketId);
+    const isSittingOut = player?.status === 'SIT_OUT' || player?.pendingSitOut;
+    socket.emit('sit-out', { enabled: !isSittingOut });
+  }, [socket, room, yourSocketId]);
 
   // リバイ
   const handleRebuy = useCallback(() => {
@@ -399,11 +438,36 @@ export function Table({
 
   // 7-2ゲームトグル
   const handleToggleSevenDeuce = useCallback(() => {
-    if (!socket) return;
-    const newValue = !settingsForm.sevenDeuceEnabled;
+    if (!socket || !room) return;
+    const newValue = !(room.metaGame?.sevenDeuce ?? false);
     socket.emit('toggle-meta-game', { game: 'sevenDeuce', enabled: newValue });
-    setSettingsForm(prev => ({ ...prev, sevenDeuceEnabled: newValue }));
-  }, [socket, settingsForm]);
+  }, [socket, room]);
+
+  const handleForceNextGame = useCallback(() => {
+    if (!socket) return;
+    socket.emit('force-next-game');
+  }, [socket]);
+
+  const handleSetRotationOneHand = useCallback(() => {
+    if (!socket) return;
+    setSettingsForm(prev => ({ ...prev, handsPerGame: 1, rotationEnabled: true }));
+    socket.emit('set-rotation', {
+      enabled: true,
+      gamesList: settingsForm.rotationGames,
+      handsPerGame: 1
+    });
+  }, [socket, settingsForm.rotationGames]);
+
+  const handleDebugReconnect = useCallback(() => {
+    if (!socket) return;
+    const resumeToken = localStorage.getItem(`mgp-resume-${roomId}`) || undefined;
+    const playerName = localStorage.getItem('mgp-player-name') || 'Player';
+    socket.disconnect();
+    setTimeout(() => {
+      socket.connect();
+      socket.emit('join-room', { roomId, playerName, resumeToken });
+    }, 500);
+  }, [socket, roomId]);
 
   // ローテーションゲームリスト切り替え
   const toggleRotationGame = useCallback((game: string) => {
@@ -436,6 +500,8 @@ export function Table({
   const isSeated = yourSeatIndex !== -1;
   const seatedPlayerCount = room.players.filter(p => p !== null).length;
   const isWaiting = room.gameState.status === 'WAITING';
+  const yourPlayer = isSeated ? room.players[yourSeatIndex] : null;
+  const isSittingOut = yourPlayer?.status === 'SIT_OUT' || yourPlayer?.pendingSitOut;
 
   // 確定ポット（現在のラウンドのベットを除く）
   // 各プレイヤーの現在のベット（player.bet）は手前に表示される
@@ -606,12 +672,29 @@ export function Table({
             <label className="checkbox-label">
               <input
                 type="checkbox"
-                checked={settingsForm.sevenDeuceEnabled}
+                checked={room?.metaGame?.sevenDeuce ?? false}
                 onChange={handleToggleSevenDeuce}
               />
               7-2ゲーム (7-2で勝つとボーナス)
             </label>
           </div>
+
+          {isDev && (
+            <div className="settings-section">
+              <h4>🧪 デバッグ</h4>
+              <div className="rotation-preview">
+                <button className="action-btn check" onClick={handleForceNextGame}>
+                  次のゲームへ強制切替
+                </button>
+                <button className="action-btn check" onClick={handleSetRotationOneHand}>
+                  1ハンドごとに切替
+                </button>
+                <button className="action-btn fold" onClick={handleDebugReconnect}>
+                  接続リセット
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -646,6 +729,11 @@ export function Table({
               {evaluateHandRank(yourHand, room.gameState.board, room.gameState.gameVariant)}
             </span>
           </div>
+          {!hasDrawnThisRound && (
+            <div className="draw-limit">
+              選択 {selectedDrawCards.length}/{maxDrawCount}
+            </div>
+          )}
           <div className="draw-cards">
             {yourHand.map((card, i) => (
               <div
@@ -678,7 +766,7 @@ export function Table({
       )}
 
       {/* アクションパネル - ゲーム中は常時表示 */}
-      {isSeated && !isWaiting && !showdownResult && (
+      {isSeated && !isWaiting && !showdownResult && !isSittingOut && (
         <ActionPanel
           validActions={validActions}
           currentBet={currentBetInfo.currentBet}
@@ -763,6 +851,20 @@ export function Table({
           <button className="action-btn check start-btn" onClick={handleStartGame}>
             🎮 ゲーム開始
           </button>
+        </div>
+      )}
+
+      {isSeated && (
+        <div className="start-game-area">
+          <button className="action-btn check start-btn" onClick={handleToggleSitOut}>
+            {isSittingOut ? '▶️ Sit In' : '🪑 Sit Out'}
+          </button>
+          {yourPlayer?.waitingForBB && (
+            <div className="waiting-message">BB待ちで次ハンド参加</div>
+          )}
+          {yourPlayer?.pendingJoin && !yourPlayer?.waitingForBB && (
+            <div className="waiting-message">次ハンドから参加</div>
+          )}
         </div>
       )}
 
