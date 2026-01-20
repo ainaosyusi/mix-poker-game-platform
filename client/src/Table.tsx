@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { PokerTable } from './components/table/PokerTable';
 import { ActionPanel } from './components/action/ActionPanel';
-import { Card, HoleCards } from './components/cards/Card';
+import { Card } from './components/cards/Card';
 import { GameLog, createActionLog, createEventLog } from './components/log/GameLog';
 import type { LogEntry } from './components/log/GameLog';
 import { evaluateHandRank } from './handEvaluator';
@@ -92,6 +92,11 @@ export function Table({
     sevenDeuceEnabled: false,
   });
 
+  // タイマー関連state
+  const [timerSeconds, setTimerSeconds] = useState<number | undefined>(undefined);
+  const [timeBankChips, setTimeBankChips] = useState(5);
+  const maxTimerSeconds = 30;
+
   // ログを追加するヘルパー
   const addLog = useCallback((entry: LogEntry) => {
     setGameLogs(prev => [...prev.slice(-49), entry]); // 最大50件保持
@@ -137,6 +142,18 @@ export function Table({
         raisesRemaining: data.raisesRemaining ?? 4,
         fixedBetSize: data.fixedBetSize,
       });
+      // タイマー開始
+      setTimerSeconds(maxTimerSeconds);
+    });
+
+    // タイマー更新（サーバーからの同期）
+    socket.on('timer-update', (data: { seconds: number }) => {
+      setTimerSeconds(data.seconds);
+    });
+
+    // タイムバンク更新
+    socket.on('timebank-update', (data: { chips: number }) => {
+      setTimeBankChips(data.chips);
     });
 
     socket.on('showdown-result', (result: ShowdownResult) => {
@@ -155,9 +172,14 @@ export function Table({
     });
 
     socket.on('action-invalid', (data: { reason: string }) => {
-      alert(`無効なアクション: ${data.reason}`);
-      // アクションが無効だった場合、再度自分のターンに設定
-      setIsYourTurn(true);
+      // "Not your turn" の場合はサーバーが既に自動処理済みなので無視
+      if (data.reason === 'Not your turn') {
+        console.log('⏰ サーバーが自動アクションを処理済み');
+        return;
+      }
+      // その他のエラーは表示
+      console.warn(`無効なアクション: ${data.reason}`);
+      addLog(createEventLog('info', `無効なアクション: ${data.reason}`));
     });
 
     // 着席成功時のログ
@@ -231,8 +253,38 @@ export function Table({
       socket.off('player-drew');
       socket.off('runout-started');
       socket.off('runout-board');
+      socket.off('timer-update');
+      socket.off('timebank-update');
     };
   }, [socket]);
+
+  // タイマーカウントダウン
+  useEffect(() => {
+    if (!isYourTurn || timerSeconds === undefined) return;
+
+    const interval = setInterval(() => {
+      setTimerSeconds(prev => {
+        if (prev === undefined || prev <= 0) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isYourTurn, timerSeconds !== undefined]);
+
+  // タイマーが0になった場合の処理
+  // ※サーバー側でタイマー管理と自動アクションを行うため、
+  //   クライアントはタイマー表示のリセットのみ行う
+  useEffect(() => {
+    if (timerSeconds === 0 && isYourTurn) {
+      // サーバーが自動アクションを処理するので、クライアントは何もしない
+      // タイマー表示をリセットするのみ
+      setTimerSeconds(undefined);
+    }
+  }, [timerSeconds, isYourTurn]);
 
   // ドローフェーズ検出
   useEffect(() => {
@@ -259,7 +311,16 @@ export function Table({
     if (!socket) return;
     socket.emit('player-action', { type, amount });
     setIsYourTurn(false);
+    setTimerSeconds(undefined);
   }, [socket]);
+
+  // タイムバンク使用
+  const handleUseTimeBank = useCallback(() => {
+    if (!socket || timeBankChips <= 0) return;
+    socket.emit('use-timebank');
+    setTimeBankChips(prev => Math.max(0, prev - 1));
+    setTimerSeconds(prev => (prev || 0) + 30);
+  }, [socket, timeBankChips]);
 
   // ドローカード選択トグル
   const toggleDrawCard = useCallback((index: number) => {
@@ -566,40 +627,13 @@ export function Table({
         onSeatClick={handleSeatClick}
         showdownResult={showdownResult}
         isRunout={isRunout}
+        yourHand={yourHand}
+        timerSeconds={timerSeconds}
+        maxTimerSeconds={maxTimerSeconds}
       />
 
-      {/* 自分の手札 (ドローフェーズでない時) */}
-      {yourHand.length > 0 && !isDrawPhase && (() => {
-        // 現在のプレイヤーのstudUpCardsを取得（Stud用）
-        const myPlayer = room.players.find(p => p?.socketId === yourSocketId);
-        const myUpCards = myPlayer?.studUpCards || [];
-        const isStudGame = ['7CS', '7CS8', 'RAZZ'].includes(room.gameState.gameVariant);
-
-        return (
-          <div className="your-hand-area">
-            <span className="hand-label">Your Hand:</span>
-            {isStudGame ? (
-              // Stud: アップカードとダウンカードを区別して表示
-              <div className="hole-cards stud-hand">
-                {yourHand.map((card, i) => {
-                  const isUpCard = myUpCards.includes(card);
-                  return (
-                    <div key={`${card}-${i}`} className={`stud-card-wrapper ${isUpCard ? 'up-card' : 'down-card'}`}>
-                      <Card card={card} size="medium" />
-                      <span className="card-type-indicator">{isUpCard ? '↑' : '↓'}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <HoleCards cards={yourHand} animate size="medium" />
-            )}
-            <span className="hand-rank-display">
-              {evaluateHandRank(yourHand, room.gameState.board, room.gameState.gameVariant)}
-            </span>
-          </div>
-        );
-      })()}
+      {/* 自分の手札表示は名前領域の上のカードで確認 */}
+      {/* 役名はPlayerSeatコンポーネント内で表示 */}
 
       {/* ドロー交換パネル */}
       {yourHand.length > 0 && isDrawPhase && isSeated && (
@@ -658,72 +692,42 @@ export function Table({
           isCapped={currentBetInfo.isCapped}
           raisesRemaining={currentBetInfo.raisesRemaining}
           fixedBetSize={currentBetInfo.fixedBetSize}
+          timerSeconds={timerSeconds}
+          maxTimerSeconds={maxTimerSeconds}
+          timeBankChips={timeBankChips}
+          onUseTimeBank={handleUseTimeBank}
         />
       )}
 
-      {/* ショーダウン結果 */}
-      {showdownResult && (() => {
-        // 不戦勝（全員フォールド）かどうかをチェック
-        const isUncontested = showdownResult.winners.length > 0 &&
-          showdownResult.winners.every(w => w.handRank === 'Uncontested');
-
-        return (
-          <div className={`showdown-panel ${isUncontested ? 'uncontested' : ''}`}>
-            {/* 不戦勝の場合はシンプルな表示 */}
-            {isUncontested ? (
-              <h2>🏆 WIN</h2>
-            ) : (
-              <h2>🏆 SHOWDOWN</h2>
-            )}
-
-            {/* 勝者 */}
-            <div className="winners-section">
-              {!isUncontested && <h3 className="text-green">Winners</h3>}
-              {showdownResult.winners.map((w, i) => (
-                <div key={i} className="winner-display">
-                  <div className="player-name">{w.playerName}</div>
-                  {isUncontested ? (
-                    <>
-                      <div className="uncontested-label">相手がフォールド</div>
-                      <div className="win-amount">+{w.amount.toLocaleString()} chips</div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="hand-rank">{w.handRank}</div>
-                      <div className="cards-row">
-                        {w.hand && w.hand.length > 0 && w.hand.map((card: string, ci: number) => (
-                          <Card key={ci} card={card} size="small" />
-                        ))}
-                      </div>
-                      <div className="win-amount">+{w.amount.toLocaleString()} chips</div>
-                    </>
-                  )}
-                </div>
-              ))}
+      {/* ショーダウン結果 - 青いパネルを廃止、シンプルに勝者のみ表示 */}
+      {/* ログに詳細が表示されるため、ここでは最小限の情報のみ */}
+      {showdownResult && showdownResult.winners.length > 0 && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 140,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(0, 0, 0, 0.85)',
+            padding: '8px 20px',
+            borderRadius: 8,
+            border: '2px solid #22c55e',
+            zIndex: 100,
+            textAlign: 'center',
+          }}
+        >
+          {showdownResult.winners.map((w, i) => (
+            <div key={i} style={{ color: '#fff', fontSize: 14 }}>
+              <span style={{ color: '#22c55e', fontWeight: 'bold' }}>🏆 {w.playerName}</span>
+              {' が '}
+              <span style={{ color: '#fbbf24' }}>+{w.amount.toLocaleString()}</span>
+              {w.handRank !== 'Uncontested' && (
+                <span style={{ color: '#9ca3af' }}> ({w.handRank})</span>
+              )}
             </div>
-
-            {/* 他プレイヤー（不戦勝以外のショーダウン時のみ表示） */}
-            {!isUncontested && showdownResult.allHands && showdownResult.allHands.length > 0 && (
-              <div className="losers-section">
-                <h4 className="text-gray">Other Players</h4>
-                {showdownResult.allHands
-                  .filter((h) => !showdownResult.winners.some((w) => w.playerId === h.playerId))
-                  .map((h, i) => (
-                    <div key={i} className="loser-display">
-                      <div className="player-name">{h.playerName}</div>
-                      <div className="cards-row">
-                        {h.hand && h.hand.map((card: string, ci: number) => (
-                          <Card key={ci} card={card} size="small" />
-                        ))}
-                      </div>
-                      {h.handRank && <div className="hand-rank">{h.handRank}</div>}
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+          ))}
+        </div>
+      )}
 
       {/* 着席コントロール */}
       {!isSeated && (

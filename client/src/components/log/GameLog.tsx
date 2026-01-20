@@ -1,6 +1,6 @@
 // ========================================
 // Mix Poker - GameLog Component
-// ゲームアクション履歴ログ
+// ゲームアクション履歴ログ（インラインスタイル版）
 // ========================================
 
 import { memo, useRef, useEffect, useState } from 'react';
@@ -15,24 +15,13 @@ export interface LogEntry {
   playerName?: string;
   amount?: number;
   message: string;
-  cards?: string[];  // 勝者のカード表示用（例: ["AS", "KH"]）
+  cards?: string[];
 }
 
 interface GameLogProps {
   entries: LogEntry[];
   isCollapsed?: boolean;
   onToggle?: () => void;
-}
-
-// ログエントリのCSSクラスを取得
-function getEntryClass(entry: LogEntry): string {
-  if (entry.type === 'action' && entry.action) {
-    return `action-${entry.action}`;
-  }
-  if (entry.type === 'event' && entry.event) {
-    return `event-${entry.event}`;
-  }
-  return '';
 }
 
 // タイムスタンプをフォーマット
@@ -61,7 +50,7 @@ function formatRank(rank: string): string {
   return rank === 'T' ? '10' : rank;
 }
 
-// カード文字列をパース（例: "AS" → { rank: "A", suit: "S" }）
+// カード文字列をパース
 function parseCardString(cardStr: string): { rank: string; suit: string } | null {
   if (!cardStr || cardStr.length < 2) return null;
   const rank = cardStr.slice(0, -1);
@@ -79,15 +68,14 @@ function MiniCard({ cardStr }: { cardStr: string }) {
 
   return (
     <span
-      className="mini-card"
       style={{
-        color: isRed ? '#e74c3c' : '#2c3e50',
+        color: isRed ? '#ef4444' : '#1e293b',
         backgroundColor: '#fff',
-        border: '1px solid #ccc',
-        borderRadius: '2px',
+        border: '1px solid #d1d5db',
+        borderRadius: 2,
         padding: '0 2px',
-        marginLeft: '2px',
-        fontSize: '10px',
+        marginLeft: 2,
+        fontSize: 10,
         fontWeight: 'bold',
         display: 'inline-block',
       }}
@@ -95,6 +83,29 @@ function MiniCard({ cardStr }: { cardStr: string }) {
       {formatRank(card.rank)}{suitEmoji}
     </span>
   );
+}
+
+// エントリの背景色取得
+function getEntryBgColor(entry: LogEntry): string {
+  if (entry.type === 'action') {
+    switch (entry.action) {
+      case 'fold': return 'rgba(239, 68, 68, 0.1)';
+      case 'check': return 'rgba(16, 185, 129, 0.1)';
+      case 'call': return 'rgba(59, 130, 246, 0.1)';
+      case 'bet': return 'rgba(251, 191, 36, 0.1)';
+      case 'raise': return 'rgba(251, 191, 36, 0.15)';
+      case 'allin': return 'rgba(124, 58, 237, 0.15)';
+    }
+  }
+  if (entry.type === 'event') {
+    switch (entry.event) {
+      case 'win': return 'rgba(34, 197, 94, 0.15)';
+      case 'flop':
+      case 'turn':
+      case 'river': return 'rgba(99, 102, 241, 0.1)';
+    }
+  }
+  return 'transparent';
 }
 
 export const GameLog = memo(function GameLog({
@@ -105,7 +116,6 @@ export const GameLog = memo(function GameLog({
   const contentRef = useRef<HTMLDivElement>(null);
   const [isMinimized, setIsMinimized] = useState(isCollapsed);
 
-  // 新しいエントリが追加されたら自動スクロール
   useEffect(() => {
     if (contentRef.current && !isMinimized) {
       contentRef.current.scrollTop = contentRef.current.scrollHeight;
@@ -118,31 +128,81 @@ export const GameLog = memo(function GameLog({
   };
 
   return (
-    <div className={`game-log ${isMinimized ? 'minimized' : ''}`}>
-      <div className="game-log-header" onClick={handleToggle}>
-        <h4 className="game-log-title">📋 ゲームログ</h4>
-        <button className="game-log-toggle">
+    <div
+      style={{
+        position: 'fixed',
+        bottom: 80, // アクションバーの上に配置
+        right: 16,
+        width: 280,
+        maxHeight: isMinimized ? 36 : 200,
+        background: 'rgba(17, 24, 39, 0.95)',
+        backdropFilter: 'blur(8px)',
+        borderRadius: 8,
+        border: '1px solid #374151',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        zIndex: 40,
+        overflow: 'hidden',
+        transition: 'max-height 0.2s ease-out',
+      }}
+    >
+      <div
+        onClick={handleToggle}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          background: 'rgba(31, 41, 55, 0.8)',
+          cursor: 'pointer',
+          borderBottom: isMinimized ? 'none' : '1px solid #374151',
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 'bold', color: '#d1d5db' }}>
+          📋 ログ
+        </span>
+        <span style={{ fontSize: 10, color: '#6b7280' }}>
           {isMinimized ? '▲' : '▼'}
-        </button>
+        </span>
       </div>
 
       {!isMinimized && (
-        <div className="game-log-content" ref={contentRef}>
+        <div
+          ref={contentRef}
+          style={{
+            maxHeight: 160,
+            overflowY: 'auto',
+            padding: '4px 0',
+          }}
+        >
           {entries.length === 0 ? (
-            <div className="game-log-empty">
+            <div
+              style={{
+                padding: '12px',
+                textAlign: 'center',
+                color: '#6b7280',
+                fontSize: 11,
+              }}
+            >
               アクションを待機中...
             </div>
           ) : (
             entries.map((entry) => (
               <div
                 key={entry.id}
-                className={`game-log-entry ${getEntryClass(entry)}`}
+                style={{
+                  padding: '4px 12px',
+                  fontSize: 11,
+                  borderBottom: '1px solid rgba(55, 65, 81, 0.5)',
+                  background: getEntryBgColor(entry),
+                }}
               >
-                <span className="log-time">{formatTime(entry.timestamp)}</span>
-                <span className="log-message">
+                <span style={{ color: '#6b7280', marginRight: 8 }}>
+                  {formatTime(entry.timestamp)}
+                </span>
+                <span style={{ color: '#d1d5db' }}>
                   {entry.message}
                   {entry.cards && entry.cards.length > 0 && (
-                    <span className="log-cards" style={{ marginLeft: '4px' }}>
+                    <span style={{ marginLeft: 4 }}>
                       {entry.cards.map((card, i) => (
                         <MiniCard key={i} cardStr={card} />
                       ))}

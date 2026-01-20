@@ -1,14 +1,17 @@
 // ========================================
 // Mix Poker - ActionPanel Component
-// アクションパネルコンポーネント
-// ベッティング構造対応: NL / PL / FL
+// アクションパネルコンポーネント（タイマー・タイムバンク対応版）
 // ========================================
 
-import React, { memo, useState, useCallback, useEffect } from 'react';
+import { memo, useState, useCallback, useEffect } from 'react';
 import type { ActionType, ActionPanelProps } from '../../types/table';
 
 interface ExtendedActionPanelProps extends ActionPanelProps {
   isYourTurn?: boolean;
+  timerSeconds?: number;
+  maxTimerSeconds?: number;
+  timeBankChips?: number;
+  onUseTimeBank?: () => void;
 }
 
 export const ActionPanel = memo(function ActionPanel({
@@ -22,45 +25,42 @@ export const ActionPanel = memo(function ActionPanel({
   isYourTurn = true,
   betStructure = 'no-limit',
   isCapped = false,
-  raisesRemaining,
+  raisesRemaining: _raisesRemaining,
   fixedBetSize,
+  timerSeconds,
+  maxTimerSeconds = 30,
+  timeBankChips = 5,
+  onUseTimeBank,
 }: ExtendedActionPanelProps) {
+  void _raisesRemaining; // unused but kept for API compatibility
   const [betAmount, setBetAmount] = useState(minRaise);
   const callAmount = currentBet - yourBet;
 
-  // BET（誰もベットしていない）かRAISE（既にベットがある）かを判定
   const isFacingBet = currentBet > 0;
-
-  // Fixed-Limit判定
   const isFixedLimit = betStructure === 'fixed';
   const isPotLimit = betStructure === 'pot-limit';
 
-  // minRaiseが変わったらbetAmountを更新
   useEffect(() => {
     if (minRaise > 0) {
       setBetAmount(minRaise);
     }
   }, [minRaise]);
 
-  // Fixed-Limitの場合、betAmountをfixedBetSizeに固定
   useEffect(() => {
     if (isFixedLimit && fixedBetSize) {
       setBetAmount(currentBet + fixedBetSize);
     }
   }, [isFixedLimit, fixedBetSize, currentBet]);
 
-  // クイックベットボタンの値を計算
-  // Fixed-Limit: 表示しない（固定額のみ）
-  // Pot-Limit: POTボタンと割合
-  // No-Limit: RAISE時は倍率、BET時はPOT比率
+  // クイックベットボタン
   const quickBets = isFixedLimit
-    ? [] // Fixed-Limitはクイックベットなし
+    ? []
     : isPotLimit
       ? [
           { label: '1/3 POT', value: Math.floor((pot + callAmount) * 0.33) + currentBet },
           { label: '1/2 POT', value: Math.floor((pot + callAmount) * 0.5) + currentBet },
           { label: '2/3 POT', value: Math.floor((pot + callAmount) * 0.67) + currentBet },
-          { label: 'POT', value: maxBet }, // POT-Limitの最大
+          { label: 'POT', value: maxBet },
         ]
       : isFacingBet
         ? [
@@ -77,7 +77,6 @@ export const ActionPanel = memo(function ActionPanel({
           ];
 
   const handleBetChange = useCallback((value: number) => {
-    // NaNや負の値をチェック
     if (isNaN(value) || value < 0) {
       setBetAmount(minRaise || 0);
       return;
@@ -88,10 +87,8 @@ export const ActionPanel = memo(function ActionPanel({
 
   const handleBetAction = useCallback(() => {
     const actionType: ActionType = validActions.includes('BET') ? 'BET' : 'RAISE';
-    // betAmountは「ベットTO（トータル額）」なので、追加分を計算してサーバーに送信
     const additionalAmount = betAmount - yourBet;
-    // スタックを超えないようにバリデーション
-    const playerStack = maxBet - yourBet; // maxBet = stack + yourBet
+    const playerStack = maxBet - yourBet;
     if (additionalAmount > playerStack) {
       alert(`スタック不足: 最大 ${playerStack} までベットできます`);
       return;
@@ -99,12 +96,8 @@ export const ActionPanel = memo(function ActionPanel({
     onAction(actionType, additionalAmount);
   }, [validActions, betAmount, yourBet, maxBet, onAction]);
 
-  // Fixed-Limitのベットアクション
   const handleFixedBetAction = useCallback(() => {
     const actionType: ActionType = validActions.includes('BET') ? 'BET' : 'RAISE';
-    // Fixed-Limit: ベットTOの額からyourBetを引いた追加額を送信
-    // BET: fixedBetSize (0からのベット)
-    // RAISE: currentBet + fixedBetSize - yourBet (コール額 + レイズ増分)
     const totalBetTo = currentBet + (fixedBetSize || 0);
     const additionalAmount = totalBetTo - yourBet;
     onAction(actionType, additionalAmount);
@@ -112,143 +105,382 @@ export const ActionPanel = memo(function ActionPanel({
 
   const canBetOrRaise = validActions.includes('BET') || validActions.includes('RAISE');
 
-  // ベッティング構造の表示名
   const betStructureLabel = {
     'no-limit': 'NL',
     'pot-limit': 'PL',
     'fixed': 'FL',
   }[betStructure];
 
+  // タイマーの進行度（%）
+  const timerProgress = timerSeconds !== undefined
+    ? Math.max(0, (timerSeconds / maxTimerSeconds) * 100)
+    : 100;
+
+  // アクションボタンのスタイル生成
+  const getButtonStyle = (
+    isEnabled: boolean,
+    variant: 'fold' | 'check' | 'call' | 'raise' | 'allin'
+  ): React.CSSProperties => {
+    const colors = {
+      fold: { bg: '#dc2626', border: '#ef4444', text: '#ffffff' },
+      check: { bg: '#10b981', border: '#10b981', text: '#ffffff' },
+      call: { bg: '#047857', border: '#10b981', text: '#ffffff' },
+      raise: { bg: '#3b82f6', border: '#60a5fa', text: '#ffffff' },
+      allin: { bg: '#7c3aed', border: '#a78bfa', text: '#ffffff' },
+    };
+    const c = colors[variant];
+
+    if (!isEnabled) {
+      // 選択不可能: 背景なし、薄い枠線
+      return {
+        padding: '8px 16px',
+        borderRadius: 6,
+        fontWeight: 'bold',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        fontSize: 12,
+        transition: 'all 0.2s',
+        cursor: 'not-allowed',
+        border: `1px solid ${c.border}33`,
+        background: 'transparent',
+        color: `${c.text}44`,
+        height: 40,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity: 0.4,
+      };
+    }
+
+    // 選択可能: 背景塗りつぶし
+    return {
+      padding: '8px 16px',
+      borderRadius: 6,
+      fontWeight: 'bold',
+      textTransform: 'uppercase',
+      letterSpacing: '0.05em',
+      fontSize: 12,
+      transition: 'all 0.2s',
+      cursor: 'pointer',
+      border: `1px solid ${c.border}`,
+      background: c.bg,
+      color: c.text,
+      height: 40,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+    };
+  };
+
   return (
-    <div className={`action-panel ${!isYourTurn ? 'waiting' : ''}`}>
-      <div className="action-header">
-        <span className="action-title">
-          {isYourTurn ? 'あなたの番です' : '相手の番です...'}
-        </span>
-        <div className="action-header-right">
-          <span className="bet-structure-badge">{betStructureLabel}</span>
-          <span className="pot-info-mini">POT: {pot.toLocaleString()}</span>
-        </div>
-      </div>
-
-      {/* キャップ表示 (Fixed-Limit) */}
-      {isFixedLimit && isCapped && (
-        <div className="capped-indicator">CAPPED</div>
-      )}
-
-      {/* レイズ残り回数表示 (Fixed-Limit) */}
-      {isFixedLimit && !isCapped && raisesRemaining !== undefined && raisesRemaining < 4 && (
-        <div className="raises-remaining">
-          残りレイズ: {raisesRemaining}回
-        </div>
-      )}
-
-      {/* 基本アクションボタン */}
-      <div className="action-buttons-row">
-        <button
-          className="action-btn fold"
-          onClick={() => onAction('FOLD')}
-          disabled={!isYourTurn || !validActions.includes('FOLD')}
+    <div
+      style={{
+        position: 'fixed',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        background: 'linear-gradient(180deg, rgba(17,24,39,0.95) 0%, rgba(17,24,39,1) 100%)',
+        borderTop: '1px solid #374151',
+        padding: '10px 16px',
+        zIndex: 50,
+        boxShadow: '0 -4px 20px rgba(0,0,0,0.5)',
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 1024,
+          margin: '0 auto',
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+        }}
+      >
+        {/* 左: ターン情報とタイマー */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
         >
-          FOLD
-        </button>
+          {/* アナログタイマー表示 */}
+          {isYourTurn && timerSeconds !== undefined && (
+            <div
+              style={{
+                position: 'relative',
+                width: 44,
+                height: 44,
+                borderRadius: '50%',
+                background: '#1f2937',
+                border: '2px solid #374151',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {/* タイマー円グラフ */}
+              <svg
+                style={{
+                  position: 'absolute',
+                  width: '100%',
+                  height: '100%',
+                  transform: 'rotate(-90deg)',
+                }}
+              >
+                <circle
+                  cx="22"
+                  cy="22"
+                  r="18"
+                  fill="none"
+                  stroke={timerProgress > 30 ? '#fbbf24' : '#ef4444'}
+                  strokeWidth="4"
+                  strokeDasharray={`${(timerProgress / 100) * 113} 113`}
+                  style={{ transition: 'stroke-dasharray 1s linear' }}
+                />
+              </svg>
+              <span
+                style={{
+                  fontSize: 14,
+                  fontWeight: 'bold',
+                  color: timerProgress > 30 ? '#fbbf24' : '#ef4444',
+                  fontFamily: 'monospace',
+                }}
+              >
+                {timerSeconds}
+              </span>
+            </div>
+          )}
 
-        <button
-          className="action-btn check"
-          onClick={() => onAction('CHECK')}
-          disabled={!isYourTurn || !validActions.includes('CHECK')}
-        >
-          CHECK
-        </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span
+              style={{
+                fontSize: 12,
+                color: isYourTurn ? '#fbbf24' : '#6b7280',
+                fontWeight: isYourTurn ? 'bold' : 'normal',
+              }}
+            >
+              {isYourTurn ? 'YOUR TURN' : '相手の番...'}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  background: '#1f2937',
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  fontSize: 10,
+                  color: '#9ca3af',
+                  border: '1px solid #374151',
+                }}
+              >
+                {betStructureLabel}
+              </span>
+              <span style={{ color: '#6b7280', fontSize: 10 }}>
+                POT: ${pot.toLocaleString()}
+              </span>
+              {isFixedLimit && isCapped && (
+                <span
+                  style={{
+                    background: 'rgba(127, 29, 29, 0.5)',
+                    color: '#f87171',
+                    padding: '2px 8px',
+                    borderRadius: 4,
+                    fontSize: 10,
+                    fontWeight: 'bold',
+                  }}
+                >
+                  CAPPED
+                </span>
+              )}
+            </div>
+          </div>
 
-        <button
-          className="action-btn call"
-          onClick={() => onAction('CALL')}
-          disabled={!isYourTurn || !validActions.includes('CALL')}
-        >
-          CALL {callAmount > 0 ? callAmount.toLocaleString() : ''}
-        </button>
-
-        <button
-          className="action-btn all-in"
-          onClick={() => onAction('ALL_IN')}
-          disabled={!isYourTurn || !validActions.includes('ALL_IN')}
-        >
-          ALL IN
-        </button>
-      </div>
-
-      {/* ベット/レイズコントロール */}
-      {isFixedLimit ? (
-        /* Fixed-Limit: シンプルな固定額ボタン */
-        <div className={`bet-controls fixed-limit ${!canBetOrRaise || !isYourTurn || isCapped ? 'disabled' : ''}`}>
-          <div className="bet-controls-divider" />
-          <div className="fixed-bet-row">
+          {/* タイムバンクボタン */}
+          {isYourTurn && onUseTimeBank && timeBankChips > 0 && (
             <button
-              className="action-btn bet fixed-bet-btn"
+              onClick={onUseTimeBank}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '6px 12px',
+                borderRadius: 6,
+                background: '#1f2937',
+                border: '1px solid #4b5563',
+                color: '#fbbf24',
+                fontSize: 11,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              <span style={{ fontSize: 14 }}>⏱️</span>
+              <span>+30s</span>
+              <span style={{ color: '#9ca3af' }}>({timeBankChips})</span>
+            </button>
+          )}
+        </div>
+
+        {/* 中央: スライダー（NL/PL用） */}
+        {!isFixedLimit && canBetOrRaise && isYourTurn && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              background: '#111827',
+              padding: '8px 12px',
+              borderRadius: 8,
+              border: '1px solid #374151',
+            }}
+          >
+            <span style={{ color: '#9ca3af', fontSize: 12, fontWeight: 'bold' }}>Bet</span>
+            <input
+              type="range"
+              min={minRaise || 0}
+              max={maxBet || 100}
+              value={betAmount}
+              onChange={(e) => handleBetChange(Number(e.target.value))}
+              disabled={!isYourTurn || !canBetOrRaise}
+              style={{
+                width: 100,
+                height: 6,
+                background: '#374151',
+                borderRadius: 4,
+                cursor: 'pointer',
+                accentColor: '#3b82f6',
+              }}
+            />
+            <div
+              style={{
+                color: '#ffffff',
+                fontFamily: 'monospace',
+                fontWeight: 'bold',
+                minWidth: 60,
+                textAlign: 'right',
+                fontSize: 12,
+              }}
+            >
+              ${betAmount.toLocaleString()}
+            </div>
+          </div>
+        )}
+
+        {/* 右: ボタン群 */}
+        <div style={{ display: 'flex', gap: 8, height: 40 }}>
+          {/* Fold */}
+          <button
+            onClick={() => onAction('FOLD')}
+            disabled={!isYourTurn || !validActions.includes('FOLD')}
+            style={getButtonStyle(
+              isYourTurn && validActions.includes('FOLD'),
+              'fold'
+            )}
+          >
+            Fold
+          </button>
+
+          {/* Check */}
+          <button
+            onClick={() => onAction('CHECK')}
+            disabled={!isYourTurn || !validActions.includes('CHECK')}
+            style={getButtonStyle(
+              isYourTurn && validActions.includes('CHECK'),
+              'check'
+            )}
+          >
+            Check
+          </button>
+
+          {/* Call */}
+          <button
+            onClick={() => onAction('CALL')}
+            disabled={!isYourTurn || !validActions.includes('CALL')}
+            style={getButtonStyle(
+              isYourTurn && validActions.includes('CALL'),
+              'call'
+            )}
+          >
+            Call {callAmount > 0 ? `$${callAmount.toLocaleString()}` : ''}
+          </button>
+
+          {/* Raise/Bet (NL/PL) */}
+          {!isFixedLimit && canBetOrRaise && (
+            <button
+              onClick={handleBetAction}
+              disabled={!isYourTurn || !canBetOrRaise}
+              style={getButtonStyle(
+                isYourTurn && canBetOrRaise,
+                'raise'
+              )}
+            >
+              {validActions.includes('BET') ? 'Bet' : 'Raise'} ${betAmount.toLocaleString()}
+            </button>
+          )}
+
+          {/* Raise (FL) */}
+          {isFixedLimit && canBetOrRaise && !isCapped && (
+            <button
               onClick={handleFixedBetAction}
               disabled={!isYourTurn || !canBetOrRaise || isCapped}
+              style={getButtonStyle(
+                isYourTurn && canBetOrRaise && !isCapped,
+                'raise'
+              )}
             >
-              {validActions.includes('BET') ? 'BET' : 'RAISE TO'} {((currentBet || 0) + (fixedBetSize || 0)).toLocaleString()}
+              {validActions.includes('BET') ? 'Bet' : 'Raise'} ${((currentBet || 0) + (fixedBetSize || 0)).toLocaleString()}
             </button>
-          </div>
-        </div>
-      ) : (
-        /* No-Limit / Pot-Limit: スライダー付き */
-        <div className={`bet-controls ${!canBetOrRaise || !isYourTurn ? 'disabled' : ''}`}>
-          <div className="bet-controls-divider" />
+          )}
 
-          {/* クイックベットボタン */}
-          <div className="quick-bet-row">
-            {quickBets.map((qb) => (
+          {/* All-In */}
+          <button
+            onClick={() => onAction('ALL_IN')}
+            disabled={!isYourTurn || !validActions.includes('ALL_IN')}
+            style={getButtonStyle(
+              isYourTurn && validActions.includes('ALL_IN'),
+              'allin'
+            )}
+          >
+            All In
+          </button>
+        </div>
+      </div>
+
+      {/* クイックベットボタン（NL/PL用） */}
+      {!isFixedLimit && canBetOrRaise && isYourTurn && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: 8,
+            marginTop: 8,
+          }}
+        >
+          {quickBets.map((qb) => {
+            const isDisabled = qb.value < minRaise || qb.value > maxBet;
+            return (
               <button
                 key={qb.label}
-                className="quick-bet-btn"
                 onClick={() => handleBetChange(qb.value)}
-                disabled={!isYourTurn || !canBetOrRaise || qb.value < minRaise || qb.value > maxBet}
+                disabled={isDisabled}
+                style={{
+                  padding: '4px 12px',
+                  borderRadius: 4,
+                  background: isDisabled ? 'transparent' : '#1f2937',
+                  color: isDisabled ? '#4b556366' : '#d1d5db',
+                  fontSize: 10,
+                  border: isDisabled ? '1px solid #374151' : '1px solid #4b5563',
+                  cursor: isDisabled ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s',
+                }}
               >
                 {qb.label}
               </button>
-            ))}
-          </div>
-
-          {/* スライダー */}
-          <div className="bet-slider-container">
-            <span className="slider-min">{minRaise > 0 ? minRaise.toLocaleString() : '-'}</span>
-            <input
-              type="range"
-              className="bet-slider"
-              min={minRaise || 0}
-              max={maxBet || 100}
-              value={betAmount}
-              onChange={(e) => handleBetChange(Number(e.target.value))}
-              disabled={!isYourTurn || !canBetOrRaise}
-            />
-            <span className="slider-max">
-              {maxBet > 0 ? maxBet.toLocaleString() : '-'}
-              {isPotLimit && <span className="max-label"> (POT)</span>}
-            </span>
-          </div>
-
-          {/* ベット額入力と実行ボタン */}
-          <div className="bet-submit-row">
-            <input
-              type="number"
-              className="bet-input"
-              value={betAmount}
-              onChange={(e) => handleBetChange(Number(e.target.value))}
-              min={minRaise || 0}
-              max={maxBet || 100}
-              disabled={!isYourTurn || !canBetOrRaise}
-            />
-            <button
-              className="action-btn bet"
-              onClick={handleBetAction}
-              disabled={!isYourTurn || !canBetOrRaise}
-            >
-              {validActions.includes('BET') ? 'BET' : 'RAISE'} {betAmount > 0 ? betAmount.toLocaleString() : ''}
-            </button>
-          </div>
+            );
+          })}
         </div>
       )}
     </div>

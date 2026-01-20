@@ -3,19 +3,19 @@
 // リアルカジノ風カードデザイン
 // ========================================
 
-import React, { memo } from 'react';
+import { memo, useRef, useEffect } from 'react';
 import type { CardProps } from '../../types/table';
 
-// スートの記号マッピング
-const SUIT_SYMBOLS: Record<string, { symbol: string; color: string }> = {
-  '♠': { symbol: '♠', color: '#1a1a1a' },
-  '♥': { symbol: '♥', color: '#dc2626' },
-  '♦': { symbol: '♦', color: '#dc2626' },
-  '♣': { symbol: '♣', color: '#1a1a1a' },
-  's': { symbol: '♠', color: '#1a1a1a' },
-  'h': { symbol: '♥', color: '#dc2626' },
-  'd': { symbol: '♦', color: '#dc2626' },
-  'c': { symbol: '♣', color: '#1a1a1a' },
+// スートの設定
+const SUITS: Record<string, { symbol: string; color: string }> = {
+  '♠': { symbol: '♠', color: '#1e293b' },
+  '♥': { symbol: '♥', color: '#ef4444' },
+  '♦': { symbol: '♦', color: '#ef4444' },
+  '♣': { symbol: '♣', color: '#1e293b' },
+  's': { symbol: '♠', color: '#1e293b' },
+  'h': { symbol: '♥', color: '#ef4444' },
+  'd': { symbol: '♦', color: '#ef4444' },
+  'c': { symbol: '♣', color: '#1e293b' },
 };
 
 // ランクの表示変換
@@ -24,7 +24,7 @@ const getRankDisplay = (rank: string): string => {
   return rank;
 };
 
-// カードをパース（例: "A♠" -> { rank: "A", suit: "♠" }）
+// カードをパース
 function parseCard(card: string): { rank: string; suit: string } {
   if (card.length === 2) {
     return { rank: card[0], suit: card[1] };
@@ -32,16 +32,15 @@ function parseCard(card: string): { rank: string; suit: string } {
   if (card.length === 3 && card[0] === 'T') {
     return { rank: 'T', suit: card.slice(1) };
   }
-  // フォールバック
   return { rank: card[0], suit: card.slice(1) };
 }
 
-// サイズのスタイル
-const CARD_SIZES: Record<string, { width: number; height: number; fontSize: number; suitSize: number }> = {
-  tiny: { width: 28, height: 39, fontSize: 10, suitSize: 8 },
-  small: { width: 45, height: 63, fontSize: 14, suitSize: 12 },
-  medium: { width: 60, height: 84, fontSize: 18, suitSize: 16 },
-  large: { width: 75, height: 105, fontSize: 22, suitSize: 20 },
+// サイズの設定
+const CARD_SIZES: Record<string, { width: number; height: number; rankSize: number; centerSize: number }> = {
+  tiny: { width: 28, height: 40, rankSize: 10, centerSize: 14 },
+  small: { width: 40, height: 56, rankSize: 12, centerSize: 18 },
+  medium: { width: 56, height: 80, rankSize: 14, centerSize: 24 },
+  large: { width: 70, height: 100, rankSize: 16, centerSize: 30 },
 };
 
 export const Card = memo(function Card({
@@ -50,73 +49,105 @@ export const Card = memo(function Card({
   size = 'medium',
   faceDown = false
 }: CardProps) {
-  const sizeStyle = CARD_SIZES[size];
+  const sizeConfig = CARD_SIZES[size] || CARD_SIZES.medium;
 
   // カード裏面
   if (faceDown) {
     return (
       <div
-        className={`card-back ${animate ? 'card-animate' : ''}`}
         style={{
-          width: sizeStyle.width,
-          height: sizeStyle.height,
+          width: sizeConfig.width,
+          height: sizeConfig.height,
+          background: 'linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%)',
+          borderRadius: 6,
+          border: '1px solid #991b1b',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          position: 'relative',
+          overflow: 'hidden',
         }}
       >
-        <div className="card-back-pattern" />
+        <div
+          style={{
+            position: 'absolute',
+            inset: 3,
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 4,
+          }}
+        />
       </div>
     );
   }
 
   const { rank, suit } = parseCard(card);
-  const suitInfo = SUIT_SYMBOLS[suit] || SUIT_SYMBOLS['♠'];
-  const isRed = suitInfo.color === '#dc2626';
+  const suitConfig = SUITS[suit] || SUITS['♠'];
 
   return (
     <div
-      className={`poker-card ${isRed ? 'red' : 'black'} ${animate ? 'card-animate' : ''}`}
       style={{
-        width: sizeStyle.width,
-        height: sizeStyle.height,
+        width: sizeConfig.width,
+        height: sizeConfig.height,
+        background: 'linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%)',
+        borderRadius: 6,
+        border: '1px solid #d1d5db',
+        boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 4,
+        position: 'relative',
+        userSelect: 'none',
+        transition: animate ? 'transform 0.2s' : undefined,
       }}
     >
-      {/* カード内側のコンテンツ */}
-      <div className="card-content">
-        {/* 左上のランク＋スート */}
-        <div className="card-corner top-left">
-          <span className="card-rank" style={{ fontSize: sizeStyle.fontSize }}>
-            {getRankDisplay(rank)}
-          </span>
-          <span className="card-suit" style={{ fontSize: sizeStyle.suitSize }}>
-            {suitInfo.symbol}
-          </span>
-        </div>
+      {/* 左上 */}
+      <div
+        style={{
+          fontSize: sizeConfig.rankSize,
+          fontWeight: 'bold',
+          color: suitConfig.color,
+          alignSelf: 'flex-start',
+          lineHeight: 1,
+        }}
+      >
+        {getRankDisplay(rank)}
+      </div>
 
-        {/* 中央のスート */}
-        <div className="card-center">
-          <span className="card-center-suit" style={{ fontSize: sizeStyle.fontSize * 2 }}>
-            {suitInfo.symbol}
-          </span>
-        </div>
+      {/* 中央 */}
+      <div
+        style={{
+          fontSize: sizeConfig.centerSize,
+          color: suitConfig.color,
+        }}
+      >
+        {suitConfig.symbol}
+      </div>
 
-        {/* 右下のランク＋スート（反転） */}
-        <div className="card-corner bottom-right">
-          <span className="card-rank" style={{ fontSize: sizeStyle.fontSize }}>
-            {getRankDisplay(rank)}
-          </span>
-          <span className="card-suit" style={{ fontSize: sizeStyle.suitSize }}>
-            {suitInfo.symbol}
-          </span>
-        </div>
+      {/* 右下 */}
+      <div
+        style={{
+          fontSize: sizeConfig.rankSize,
+          fontWeight: 'bold',
+          color: suitConfig.color,
+          alignSelf: 'flex-end',
+          transform: 'rotate(180deg)',
+          lineHeight: 1,
+        }}
+      >
+        {getRankDisplay(rank)}
       </div>
     </div>
   );
 });
 
-// ホールカード（手札）コンポーネント
+// ホールカード
 interface HoleCardsProps {
   cards: string[];
   animate?: boolean;
-  size?: 'small' | 'medium' | 'large';
+  size?: 'tiny' | 'small' | 'medium' | 'large';
 }
 
 export const HoleCards = memo(function HoleCards({
@@ -125,39 +156,121 @@ export const HoleCards = memo(function HoleCards({
   size = 'medium'
 }: HoleCardsProps) {
   return (
-    <div className="hole-cards">
+    <div style={{ display: 'flex', gap: -8, alignItems: 'center', justifyContent: 'center' }}>
       {cards.map((card, index) => (
-        <Card
+        <div
           key={`${card}-${index}`}
-          card={card}
-          animate={animate}
-          size={size}
-        />
+          style={{
+            transform: index === 0 ? 'rotate(-6deg)' : 'rotate(6deg)',
+            marginLeft: index > 0 ? -8 : 0,
+            zIndex: index,
+          }}
+        >
+          <Card card={card} animate={animate} size={size} />
+        </div>
       ))}
     </div>
   );
 });
 
-// コミュニティカードコンポーネント
+// コミュニティカード
 interface CommunityCardsProps {
   cards: string[];
   animate?: boolean;
+  highlightIndices?: number[]; // ハイライトするカードのインデックス（ショーダウン用）
 }
 
 export const CommunityCards = memo(function CommunityCards({
   cards,
-  animate = false
+  animate = false,
+  highlightIndices = [],
 }: CommunityCardsProps) {
+  // 前回のカード枚数を追跡
+  const prevCountRef = useRef(0);
+
+  // 新しく追加されたカードのインデックス
+  const newCardsStartIndex = animate ? prevCountRef.current : cards.length;
+
+  // アニメーション完了後にカウントを更新
+  useEffect(() => {
+    if (cards.length !== prevCountRef.current) {
+      // 少し遅延してからカウントを更新（アニメーション完了後）
+      const timer = setTimeout(() => {
+        prevCountRef.current = cards.length;
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+  }, [cards.length]);
+
+  // ボードがリセットされた場合は即座にカウントをリセット
+  useEffect(() => {
+    if (cards.length === 0) {
+      prevCountRef.current = 0;
+    }
+  }, [cards.length]);
+
   return (
-    <div className="community-cards">
-      {cards.map((card, index) => (
-        <Card
-          key={`community-${card}-${index}`}
-          card={card}
-          animate={animate}
-          size="medium"
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
+      {cards.map((card, index) => {
+        const isHighlighted = highlightIndices.includes(index);
+        const isNewCard = animate && index >= newCardsStartIndex;
+        // 新しいカードのみアニメーション、フロップは順番に
+        const animationDelay = isNewCard ? (index - newCardsStartIndex) * 0.12 : 0;
+
+        return (
+          <div
+            key={`community-${card}-${index}-${isNewCard ? 'new' : 'old'}`}
+            style={{
+              animation: isNewCard ? `cardDealIn 0.4s ease-out ${animationDelay}s both` : undefined,
+              transform: isHighlighted ? 'translateY(-8px)' : undefined,
+              transition: 'transform 0.3s ease',
+            }}
+          >
+            <div
+              style={{
+                boxShadow: isHighlighted ? '0 0 15px rgba(251, 191, 36, 0.8)' : undefined,
+                borderRadius: 8,
+              }}
+            >
+              <Card
+                card={card}
+                animate={false}
+                size="medium"
+              />
+            </div>
+          </div>
+        );
+      })}
+      {/* 空のカードスロット */}
+      {[...Array(5 - cards.length)].map((_, idx) => (
+        <div
+          key={`empty-${idx}`}
+          style={{
+            width: 56,
+            height: 80,
+            borderRadius: 6,
+            border: '2px dashed rgba(255,255,255,0.15)',
+            background: 'rgba(0,0,0,0.1)',
+          }}
         />
       ))}
+      {/* カードアニメーション用keyframes */}
+      <style>{`
+        @keyframes cardDealIn {
+          0% {
+            opacity: 0;
+            transform: translateY(-30px) scale(0.8) rotateX(-15deg);
+          }
+          50% {
+            opacity: 0.8;
+            transform: translateY(5px) scale(1.02);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0) scale(1) rotateX(0deg);
+          }
+        }
+      `}</style>
     </div>
   );
 });

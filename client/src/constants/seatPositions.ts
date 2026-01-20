@@ -7,39 +7,41 @@ import type { SeatPosition } from '../types/table';
 
 // 6人テーブル配置（楕円形）
 // 座席0が下中央（自分の位置）から時計回り
+// ネームタグはテーブル縁に配置、チップはテーブル内部
 export const SEAT_POSITIONS_6: SeatPosition[] = [
-  // 0: 下中央（自分）
-  { x: 0, y: 52, angle: 0, betOffset: { x: 0, y: -22 } },
+  // 0: 下中央（自分）- テーブル外縁
+  { x: 0, y: 58, angle: 0, betOffset: { x: 0, y: -30 } },
   // 1: 左下
-  { x: -42, y: 28, angle: 15, betOffset: { x: 18, y: -8 } },
+  { x: -45, y: 32, angle: 15, betOffset: { x: 22, y: -12 } },
   // 2: 左上
-  { x: -42, y: -28, angle: -15, betOffset: { x: 18, y: 8 } },
+  { x: -45, y: -32, angle: -15, betOffset: { x: 22, y: 12 } },
   // 3: 上中央
-  { x: 0, y: -52, angle: 0, betOffset: { x: 0, y: 22 } },
+  { x: 0, y: -58, angle: 0, betOffset: { x: 0, y: 30 } },
   // 4: 右上
-  { x: 42, y: -28, angle: 15, betOffset: { x: -18, y: 8 } },
+  { x: 45, y: -32, angle: 15, betOffset: { x: -22, y: 12 } },
   // 5: 右下
-  { x: 42, y: 28, angle: -15, betOffset: { x: -18, y: -8 } },
+  { x: 45, y: 32, angle: -15, betOffset: { x: -22, y: -12 } },
 ];
 
 // 8人テーブル配置（楕円形）
+// 全席がテーブル外縁に配置されるように調整
 export const SEAT_POSITIONS_8: SeatPosition[] = [
   // 0: 下中央
-  { x: 0, y: 52, angle: 0, betOffset: { x: 0, y: -20 } },
+  { x: 0, y: 58, angle: 0, betOffset: { x: 0, y: -28 } },
   // 1: 左下
-  { x: -32, y: 40, angle: 20, betOffset: { x: 14, y: -10 } },
+  { x: -35, y: 46, angle: 20, betOffset: { x: 18, y: -14 } },
   // 2: 左
-  { x: -48, y: 8, angle: 10, betOffset: { x: 18, y: 0 } },
-  // 3: 左上
-  { x: -32, y: -28, angle: -10, betOffset: { x: 14, y: 10 } },
+  { x: -52, y: 10, angle: 10, betOffset: { x: 22, y: 0 } },
+  // 3: 左上 - テーブル外縁に配置
+  { x: -38, y: -38, angle: -10, betOffset: { x: 18, y: 16 } },
   // 4: 上中央
-  { x: 0, y: -52, angle: 0, betOffset: { x: 0, y: 20 } },
-  // 5: 右上
-  { x: 32, y: -28, angle: 10, betOffset: { x: -14, y: 10 } },
+  { x: 0, y: -58, angle: 0, betOffset: { x: 0, y: 28 } },
+  // 5: 右上 - テーブル外縁に配置
+  { x: 38, y: -38, angle: 10, betOffset: { x: -18, y: 16 } },
   // 6: 右
-  { x: 48, y: 8, angle: -10, betOffset: { x: -18, y: 0 } },
+  { x: 52, y: 10, angle: -10, betOffset: { x: -22, y: 0 } },
   // 7: 右下
-  { x: 32, y: 40, angle: -20, betOffset: { x: -14, y: -10 } },
+  { x: 35, y: 46, angle: -20, betOffset: { x: -18, y: -14 } },
 ];
 
 // チップカラー定義

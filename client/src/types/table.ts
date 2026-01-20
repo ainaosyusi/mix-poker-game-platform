@@ -124,6 +124,7 @@ export interface CardProps {
   animate?: boolean;
   size?: 'tiny' | 'small' | 'medium' | 'large';
   faceDown?: boolean;
+  className?: string;
 }
 
 // ベッティング構造タイプ

@@ -28,6 +28,167 @@ const metaGameManager = new MetaGameManager();
 const rotationManager = new RotationManager();
 const potManager = new PotManager();
 
+// タイマー管理
+interface PlayerTimer {
+  roomId: string;
+  playerId: string;
+  seconds: number;
+  intervalId: NodeJS.Timeout;
+  timeBankChips: number;
+}
+const activeTimers: Map<string, PlayerTimer> = new Map(); // playerId -> timer
+const playerTimeBanks: Map<string, number> = new Map(); // playerId -> chips
+
+const MAX_TIMER_SECONDS = 30;
+const INITIAL_TIMEBANK_CHIPS = 5;
+const HAND_END_DELAY_MS = 2000;
+
+// タイマー開始関数
+function startPlayerTimer(roomId: string, playerId: string, io: Server) {
+  // 既存のタイマーをクリア
+  clearPlayerTimer(playerId);
+
+  // タイムバンク初期化（初回のみ）
+  if (!playerTimeBanks.has(playerId)) {
+    playerTimeBanks.set(playerId, INITIAL_TIMEBANK_CHIPS);
+  }
+
+  const timer: PlayerTimer = {
+    roomId,
+    playerId,
+    seconds: MAX_TIMER_SECONDS,
+    intervalId: setInterval(() => {
+      const t = activeTimers.get(playerId);
+      if (!t) return;
+
+      t.seconds--;
+
+      // クライアントにタイマー更新を送信
+      io.to(playerId).emit('timer-update', { seconds: t.seconds });
+
+      // タイムアウト時の自動アクション
+      if (t.seconds <= 0) {
+        clearPlayerTimer(playerId);
+        handleTimerTimeout(roomId, playerId, io);
+      }
+    }, 1000),
+    timeBankChips: playerTimeBanks.get(playerId) || INITIAL_TIMEBANK_CHIPS
+  };
+
+  activeTimers.set(playerId, timer);
+}
+
+// タイマークリア関数
+function clearPlayerTimer(playerId: string) {
+  const timer = activeTimers.get(playerId);
+  if (timer) {
+    clearInterval(timer.intervalId);
+    activeTimers.delete(playerId);
+  }
+}
+
+// タイムアウト時の自動アクション
+function handleTimerTimeout(roomId: string, playerId: string, io: Server) {
+  const room = roomManager.getRoomById(roomId);
+  if (!room) return;
+
+  const engine = gameEngines.get(roomId);
+  if (!engine) return;
+
+  const player = room.players.find(p => p?.socketId === playerId);
+  if (!player) return;
+
+  // チェック可能ならチェック、そうでなければフォールド
+  const validActions = engine.getValidActions(room, playerId);
+  const actionType: ActionType = validActions.includes('CHECK') ? 'CHECK' : 'FOLD';
+
+  console.log(`⏰ Timer timeout for ${player.name} - Auto ${actionType}`);
+
+  const result = engine.processAction(room, {
+    playerId,
+    type: actionType,
+    timestamp: Date.now()
+  });
+
+  if (result.success) {
+    // ショーダウンチェック等の処理は player-action と同様に行う
+    processPostAction(roomId, room, engine, io);
+  }
+}
+
+// アクション後の共通処理
+function processPostAction(roomId: string, room: any, engine: GameEngine, io: Server) {
+  // ショーダウンチェック
+  if (room.gameState.status === 'SHOWDOWN') {
+    const activePlayers = room.players.filter((p: any) =>
+      p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
+    );
+
+    if (room.gameState.isRunout && activePlayers.length >= 2) {
+      // オールインランアウトの処理は既存のコードに任せる
+      return;
+    }
+
+    let showdownResult;
+    if (activePlayers.length === 1) {
+      showdownResult = showdownManager.awardToLastPlayer(room);
+    } else {
+      const calculatedPots = potManager.calculatePots(room.players);
+      room.gameState.pot = calculatedPots;
+      showdownResult = showdownManager.executeShowdown(room);
+    }
+
+    io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
+
+    // 7-2ボーナスチェック
+    if (showdownResult.winners.length > 0) {
+      for (const winner of showdownResult.winners) {
+        const bonus = metaGameManager.checkSevenDeuce(room, winner.playerId, winner.hand);
+        if (bonus) {
+          io.to(`room:${roomId}`).emit('seven-deuce-bonus', bonus);
+        }
+      }
+    }
+
+    // ローテーションチェック
+    const rotation = rotationManager.checkRotation(room);
+    if (rotation.changed) {
+      io.to(`room:${roomId}`).emit('next-game', {
+        nextGame: rotation.nextGame,
+        gamesList: room.rotation.gamesList
+      });
+    }
+
+    room.gameState.status = 'WAITING' as any;
+  }
+
+  // 全員に更新を送信
+  io.to(`room:${roomId}`).emit('room-state-update', room);
+
+  // 次のアクティブプレイヤーに行動を促す
+  if (room.activePlayerIndex !== -1) {
+    const nextPlayer = room.players[room.activePlayerIndex];
+    if (nextPlayer) {
+      const validActions = engine.getValidActions(room, nextPlayer.socketId);
+      const bettingInfo = engine.getBettingInfo(room, nextPlayer.socketId);
+      io.to(nextPlayer.socketId).emit('your-turn', {
+        validActions,
+        currentBet: room.gameState.currentBet,
+        minRaise: bettingInfo.minBet,
+        maxBet: bettingInfo.maxBet,
+        betStructure: bettingInfo.betStructure,
+        isCapped: bettingInfo.isCapped,
+        raisesRemaining: bettingInfo.raisesRemaining,
+        fixedBetSize: bettingInfo.fixedBetSize,
+        timeout: MAX_TIMER_SECONDS * 1000
+      });
+
+      // 新しいタイマーを開始
+      startPlayerTimer(roomId, nextPlayer.socketId, io);
+    }
+  }
+}
+
 /**
  * ルームデータをサニタイズ（他プレイヤーのhandを隠す）
  * @param room ルームオブジェクト
@@ -363,11 +524,48 @@ io.on('connection', (socket) => {
           isCapped: bettingInfo.isCapped,
           raisesRemaining: bettingInfo.raisesRemaining,
           fixedBetSize: bettingInfo.fixedBetSize,
-          timeout: 30000
+          timeout: MAX_TIMER_SECONDS * 1000
         });
+
+        // タイマー開始
+        startPlayerTimer(roomId, activePlayer.socketId, io);
+
+        // タイムバンク情報を送信
+        const timeBankChips = playerTimeBanks.get(activePlayer.socketId) || INITIAL_TIMEBANK_CHIPS;
+        io.to(activePlayer.socketId).emit('timebank-update', { chips: timeBankChips });
       }
 
       console.log(`🎮 Game started in room ${roomId}`);
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // タイムバンク使用
+  socket.on('use-timebank', () => {
+    try {
+      const timer = activeTimers.get(socket.id);
+      if (!timer) {
+        socket.emit('error', { message: 'No active timer' });
+        return;
+      }
+
+      const currentChips = playerTimeBanks.get(socket.id) || 0;
+      if (currentChips <= 0) {
+        socket.emit('error', { message: 'No time bank chips remaining' });
+        return;
+      }
+
+      // タイムバンクチップを消費して30秒追加
+      playerTimeBanks.set(socket.id, currentChips - 1);
+      timer.seconds += 30;
+
+      console.log(`⏱️ Time bank used by ${socket.id} (${currentChips - 1} chips remaining)`);
+
+      // クライアントに更新を通知
+      socket.emit('timer-update', { seconds: timer.seconds });
+      socket.emit('timebank-update', { chips: currentChips - 1 });
+
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
@@ -393,6 +591,9 @@ io.on('connection', (socket) => {
         socket.emit('error', { message: 'Game not started' });
         return;
       }
+
+      // タイマーをクリア
+      clearPlayerTimer(socket.id);
 
       // アクションを処理
       const result = engine.processAction(room, {
@@ -564,8 +765,15 @@ io.on('connection', (socket) => {
             isCapped: bettingInfo.isCapped,
             raisesRemaining: bettingInfo.raisesRemaining,
             fixedBetSize: bettingInfo.fixedBetSize,
-            timeout: 30000
+            timeout: MAX_TIMER_SECONDS * 1000
           });
+
+          // タイマー開始
+          startPlayerTimer(roomId, nextPlayer.socketId, io);
+
+          // タイムバンク情報を送信
+          const timeBankChips = playerTimeBanks.get(nextPlayer.socketId) || INITIAL_TIMEBANK_CHIPS;
+          io.to(nextPlayer.socketId).emit('timebank-update', { chips: timeBankChips });
         }
       }
 
