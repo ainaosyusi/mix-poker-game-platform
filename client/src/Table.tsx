@@ -1,6 +1,7 @@
 // ========================================
-// Mix Poker - Table Component (Refactored)
+// Mix Poker - Table Component (Simplified)
 // メインテーブルページコンポーネント
+// 自動着席・自動開始対応版
 // ========================================
 
 import { useState, useEffect, useCallback } from 'react';
@@ -57,8 +58,6 @@ export function Table({
   onLeaveRoom
 }: TableProps) {
   const [room, setRoom] = useState<Room | null>(initialRoomData);
-  const [buyInAmount, setBuyInAmount] = useState(500);
-  const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   const [yourHand, setYourHand] = useState<string[]>(initialHand || []);
   const [isYourTurn, setIsYourTurn] = useState(false);
   const [validActions, setValidActions] = useState<ActionType[]>([]);
@@ -74,9 +73,7 @@ export function Table({
   });
   const [gameLogs, setGameLogs] = useState<LogEntry[]>([]);
   const [isLogCollapsed, setIsLogCollapsed] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [rebuyAmount, setRebuyAmount] = useState(500);
-  const [showRebuyDialog, setShowRebuyDialog] = useState(false);
   const [actionToken, setActionToken] = useState<string | null>(null);
 
   // Draw game用state
@@ -87,23 +84,11 @@ export function Table({
   // ランアウト(オールイン)用state
   const [isRunout, setIsRunout] = useState(false);
 
-  // ゲーム設定用state
-  const [settingsForm, setSettingsForm] = useState({
-    smallBlind: 5,
-    bigBlind: 10,
-    studAnte: 2, // Studゲームのアンティ/Bring-In
-    selectedVariant: 'NLH',
-    rotationEnabled: false,
-    rotationGames: ['NLH', 'PLO'],
-    handsPerGame: 8,
-  });
-
   // タイマー関連state
   const [timerSeconds, setTimerSeconds] = useState<number | undefined>(undefined);
   const [timeBankChips, setTimeBankChips] = useState(5);
   const maxTimerSeconds = 30;
   const maxDrawCount = room ? (DRAW_MAX_BY_VARIANT[room.gameState.gameVariant] || 5) : 5;
-  const isDev = import.meta.env.DEV;
 
   // ログを追加するヘルパー
   const addLog = useCallback((entry: LogEntry) => {
@@ -126,7 +111,6 @@ export function Table({
       setRoom(data.room);
       setYourHand(data.yourHand || []);
       setShowdownResult(null);
-      // ハンド開始ログは不要（ユーザー要望）
     });
 
     socket.on('your-turn', (data: {
@@ -152,16 +136,13 @@ export function Table({
         fixedBetSize: data.fixedBetSize,
       });
       setActionToken(data.actionToken || null);
-      // タイマー開始
       setTimerSeconds(maxTimerSeconds);
     });
 
-    // タイマー更新（サーバーからの同期）
     socket.on('timer-update', (data: { seconds: number }) => {
       setTimerSeconds(data.seconds);
     });
 
-    // タイムバンク更新
     socket.on('timebank-update', (data: { chips: number }) => {
       setTimeBankChips(data.chips);
     });
@@ -170,67 +151,50 @@ export function Table({
       setShowdownResult(result);
       setYourHand([]);
       setIsYourTurn(false);
-      // ショーダウンログは不要、勝者のみ表示
       result.winners.forEach(w => {
-        // 役名と獲得額を表示（カードも小さく表示）
         addLog(createEventLog(
           'win',
-          `${w.playerName} が ${w.amount.toLocaleString()} を獲得 (${w.handRank})`,
+          `${w.playerName} wins ${w.amount.toLocaleString()} (${w.handRank})`,
           w.hand && w.hand.length > 0 ? w.hand : undefined
         ));
       });
     });
 
     socket.on('action-invalid', (data: { reason: string }) => {
-      // "Not your turn" の場合はサーバーが既に自動処理済みなので無視
       if (data.reason === 'Not your turn') {
-        console.log('⏰ サーバーが自動アクションを処理済み');
         return;
       }
       if (data.reason === 'Invalid action token' || data.reason === 'Action token expired' || data.reason === 'Room is processing another action') {
         socket.emit('request-room-state');
       }
-      // その他のエラーは表示
-      console.warn(`無効なアクション: ${data.reason}`);
-      addLog(createEventLog('info', `無効なアクション: ${data.reason}`));
+      console.warn(`Invalid action: ${data.reason}`);
+      addLog(createEventLog('info', `Invalid action: ${data.reason}`));
     });
 
-    // 着席成功時のログ
     socket.on('sit-down-success', (data: { seatIndex: number }) => {
-      console.log(`✅ Successfully sat down at seat ${data.seatIndex}`);
-      addLog(createEventLog('info', `シート ${data.seatIndex + 1} に着席しました`));
+      console.log(`Seated at ${data.seatIndex}`);
     });
 
-    // リバイ成功時
     socket.on('rebuy-success', (data: { amount: number; newStack: number }) => {
-      console.log(`💰 Rebuy successful: +${data.amount} (new stack: ${data.newStack})`);
-      addLog(createEventLog('info', `${data.amount} チップを追加しました (合計: ${data.newStack})`));
-      setShowRebuyDialog(false);
+      addLog(createEventLog('info', `Added ${data.amount} chips (total: ${data.newStack})`));
     });
 
-    // ドロー完了時（自分のカード更新）
     socket.on('draw-complete', (data: { newHand: string[] }) => {
       setYourHand(data.newHand);
       setHasDrawnThisRound(true);
       setSelectedDrawCards([]);
     });
 
-    // 他プレイヤーのドロー情報
     socket.on('player-drew', (data: { playerId: string; playerName: string; cardCount: number }) => {
-      addLog(createEventLog('info', `${data.playerName} が ${data.cardCount} 枚交換`));
+      addLog(createEventLog('info', `${data.playerName} drew ${data.cardCount} cards`));
     });
 
-    // オールインランアウト開始
-    socket.on('runout-started', (data: { runoutPhase: string; fullBoard: string[] }) => {
-      console.log(`🎬 All-in runout started from ${data.runoutPhase}`);
+    socket.on('runout-started', (_data: { runoutPhase: string; fullBoard: string[] }) => {
       setIsRunout(true);
-      addLog(createEventLog('info', '⚡ オールイン！ランアウト開始...'));
+      addLog(createEventLog('info', 'All-in runout...'));
     });
 
-    // オールインランアウト中のボード更新
     socket.on('runout-board', (data: { board: string[]; phase: string }) => {
-      console.log(`🃏 Runout ${data.phase}: ${data.board.join(' ')}`);
-      // room stateを直接更新してボードを表示
       setRoom(prev => {
         if (!prev) return prev;
         return {
@@ -241,14 +205,12 @@ export function Table({
           }
         };
       });
-      // フェーズログ
       if (data.phase === 'FLOP') {
         addLog(createEventLog('flop', data.board.slice(0, 3).join(' ')));
       } else if (data.phase === 'TURN') {
         addLog(createEventLog('turn', data.board[3]));
       } else if (data.phase === 'RIVER') {
         addLog(createEventLog('river', data.board[4]));
-        // リバー後にランアウト終了
         setTimeout(() => setIsRunout(false), 500);
       }
     });
@@ -288,13 +250,8 @@ export function Table({
     return () => clearInterval(interval);
   }, [isYourTurn, timerSeconds !== undefined]);
 
-  // タイマーが0になった場合の処理
-  // ※サーバー側でタイマー管理と自動アクションを行うため、
-  //   クライアントはタイマー表示のリセットのみ行う
   useEffect(() => {
     if (timerSeconds === 0 && isYourTurn) {
-      // サーバーが自動アクションを処理するので、クライアントは何もしない
-      // タイマー表示をリセットするのみ
       setTimerSeconds(undefined);
     }
   }, [timerSeconds, isYourTurn]);
@@ -307,12 +264,10 @@ export function Table({
     const isInDrawPhase = gameState.isDrawPhase === true;
 
     if (isInDrawPhase && !isDrawPhase) {
-      // ドローフェーズ開始
       setIsDrawPhase(true);
       setHasDrawnThisRound(false);
       setSelectedDrawCards([]);
     } else if (!isInDrawPhase && isDrawPhase) {
-      // ドローフェーズ終了
       setIsDrawPhase(false);
       setHasDrawnThisRound(false);
       setSelectedDrawCards([]);
@@ -365,25 +320,7 @@ export function Table({
     socket.emit('draw-exchange', { discardIndexes: selectedDrawCards });
   }, [socket, selectedDrawCards]);
 
-  // ゲーム開始
-  const handleStartGame = useCallback(() => {
-    if (!socket) return;
-    socket.emit('start-game');
-  }, [socket]);
-
-  // 着席
-  const handleSitDown = useCallback((seatIndex: number) => {
-    if (!socket || !room) return;
-    let resumeToken = localStorage.getItem(`mgp-resume-${roomId}`);
-    if (!resumeToken) {
-      resumeToken = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-      localStorage.setItem(`mgp-resume-${roomId}`, resumeToken);
-    }
-    socket.emit('sit-down', { seatIndex, buyIn: buyInAmount, resumeToken });
-    setSelectedSeat(null);
-  }, [socket, room, buyInAmount, roomId]);
-
-  // 離席
+  // 離席（leave-room発行 → メインメニューへ）
   const handleLeaveRoom = useCallback(() => {
     if (!socket) return;
     socket.emit('leave-room');
@@ -391,93 +328,11 @@ export function Table({
     onLeaveRoom();
   }, [socket, onLeaveRoom]);
 
-  const handleToggleSitOut = useCallback(() => {
-    if (!socket || !room) return;
-    const player = room.players.find(p => p?.socketId === yourSocketId);
-    const isSittingOut = player?.status === 'SIT_OUT' || player?.pendingSitOut;
-    socket.emit('sit-out', { enabled: !isSittingOut });
-  }, [socket, room, yourSocketId]);
-
   // リバイ
   const handleRebuy = useCallback(() => {
     if (!socket || rebuyAmount <= 0) return;
     socket.emit('rebuy', { amount: rebuyAmount });
   }, [socket, rebuyAmount]);
-
-  // 座席選択
-  const handleSeatClick = useCallback((index: number) => {
-    setSelectedSeat(prev => prev === index ? null : index);
-  }, []);
-
-  // ゲームバリアント変更
-  const handleChangeVariant = useCallback((variant: string) => {
-    if (!socket) return;
-    socket.emit('set-game-variant', { variant });
-    setSettingsForm(prev => ({ ...prev, selectedVariant: variant }));
-  }, [socket]);
-
-  // ローテーション設定
-  const handleSetRotation = useCallback(() => {
-    if (!socket) return;
-    socket.emit('set-rotation', {
-      enabled: settingsForm.rotationEnabled,
-      gamesList: settingsForm.rotationGames,
-      handsPerGame: settingsForm.handsPerGame
-    });
-  }, [socket, settingsForm]);
-
-  // ブラインド変更
-  const handleUpdateBlinds = useCallback(() => {
-    if (!socket) return;
-    socket.emit('update-room-config', {
-      smallBlind: settingsForm.smallBlind,
-      bigBlind: settingsForm.bigBlind,
-      studAnte: settingsForm.studAnte
-    });
-  }, [socket, settingsForm]);
-
-  // 7-2ゲームトグル
-  const handleToggleSevenDeuce = useCallback(() => {
-    if (!socket || !room) return;
-    const newValue = !(room.metaGame?.sevenDeuce ?? false);
-    socket.emit('toggle-meta-game', { game: 'sevenDeuce', enabled: newValue });
-  }, [socket, room]);
-
-  const handleForceNextGame = useCallback(() => {
-    if (!socket) return;
-    socket.emit('force-next-game');
-  }, [socket]);
-
-  const handleSetRotationOneHand = useCallback(() => {
-    if (!socket) return;
-    setSettingsForm(prev => ({ ...prev, handsPerGame: 1, rotationEnabled: true }));
-    socket.emit('set-rotation', {
-      enabled: true,
-      gamesList: settingsForm.rotationGames,
-      handsPerGame: 1
-    });
-  }, [socket, settingsForm.rotationGames]);
-
-  const handleDebugReconnect = useCallback(() => {
-    if (!socket) return;
-    const resumeToken = localStorage.getItem(`mgp-resume-${roomId}`) || undefined;
-    const playerName = localStorage.getItem('mgp-player-name') || 'Player';
-    socket.disconnect();
-    setTimeout(() => {
-      socket.connect();
-      socket.emit('join-room', { roomId, playerName, resumeToken });
-    }, 500);
-  }, [socket, roomId]);
-
-  // ローテーションゲームリスト切り替え
-  const toggleRotationGame = useCallback((game: string) => {
-    setSettingsForm(prev => {
-      const games = prev.rotationGames.includes(game)
-        ? prev.rotationGames.filter(g => g !== game)
-        : [...prev.rotationGames, game];
-      return { ...prev, rotationGames: games };
-    });
-  }, []);
 
   // ローディング中
   if (!room) {
@@ -485,10 +340,10 @@ export function Table({
       <div className="table-loading">
         <div className="loading-content">
           <div className="loading-icon">🎰</div>
-          <h3>部屋のデータを取得中...</h3>
-          <p className="text-gray">ルームID: {roomId}</p>
+          <h3>Loading...</h3>
+          <p className="text-gray">Room: {roomId}</p>
           <button className="action-btn fold" onClick={onLeaveRoom}>
-            ロビーに戻る
+            Back
           </button>
         </div>
       </div>
@@ -503,16 +358,9 @@ export function Table({
   const yourPlayer = isSeated ? room.players[yourSeatIndex] : null;
   const isSittingOut = yourPlayer?.status === 'SIT_OUT' || yourPlayer?.pendingSitOut;
 
-  // 確定ポット（現在のラウンドのベットを除く）
-  // 各プレイヤーの現在のベット（player.bet）は手前に表示される
-  // 中央のポットは確定分のみ表示する
   const currentRoundBets = room.players.reduce((sum, p) => sum + (p?.bet || 0), 0);
   const totalPotRaw = room.gameState.pot.main + room.gameState.pot.side.reduce((sum, s) => sum + s.amount, 0);
-  // 表示用ポット = 全体ポット - 現在のラウンドのベット合計
-  // ただし、pot.mainには既にcurrentRoundBetsが含まれている
-  // 注: この実装はpot.mainにベットが即座に追加される現在のロジックに対応
   const displayPot = totalPotRaw - currentRoundBets;
-  // ActionPanel用にはtotalPotを使用（ベット計算用）
   const totalPot = totalPotRaw;
 
   const yourBet = isSeated ? (room.players[yourSeatIndex]?.bet || 0) : 0;
@@ -530,9 +378,8 @@ export function Table({
             <span className="hand-info">Hand #{room.gameState.handNumber}</span>
           </div>
         </div>
-        {/* 現在のゲームバリアント表示 */}
         <div className="game-variant-display">
-          <span className="game-variant-label">現在のゲーム</span>
+          <span className="game-variant-label">Game</span>
           <span className="game-variant-name">{getGameVariantFullName(room.gameState.gameVariant)}</span>
           {room.rotation.gamesList.length > 1 && (
             <span className="rotation-info">
@@ -540,163 +387,10 @@ export function Table({
             </span>
           )}
         </div>
-        <button className="action-btn check" onClick={() => setShowSettings(!showSettings)}>
-          ⚙️ 設定
-        </button>
         <button className="action-btn fold" onClick={handleLeaveRoom}>
-          ロビーに戻る
+          Leave
         </button>
       </header>
-
-      {/* ゲーム設定パネル */}
-      {showSettings && (
-        <div className="settings-panel">
-          <div className="settings-header">
-            <h3>⚙️ ゲーム設定</h3>
-            <button className="close-btn" onClick={() => setShowSettings(false)}>✕</button>
-          </div>
-
-          {/* ゲームバリアント選択 */}
-          <div className="settings-section">
-            <h4>🎮 ゲーム選択</h4>
-            <div className="variant-buttons">
-              {Object.entries(GAME_VARIANT_NAMES).map(([id, name]) => (
-                <button
-                  key={id}
-                  className={`variant-btn ${room.gameState.gameVariant === id ? 'active' : ''}`}
-                  onClick={() => handleChangeVariant(id)}
-                  disabled={!isWaiting}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-            {!isWaiting && <p className="settings-hint">※ ゲーム中は変更できません</p>}
-          </div>
-
-          {/* ローテーション設定 */}
-          <div className="settings-section">
-            <h4>🔄 ミックスゲーム (ローテーション)</h4>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={settingsForm.rotationEnabled}
-                onChange={(e) => setSettingsForm(prev => ({ ...prev, rotationEnabled: e.target.checked }))}
-              />
-              ローテーションを有効にする
-            </label>
-
-            {settingsForm.rotationEnabled && (
-              <>
-                <div className="rotation-games">
-                  <p>ローテーションに含めるゲーム:</p>
-                  <div className="game-checkboxes">
-                    {Object.entries(GAME_VARIANT_NAMES).map(([id, name]) => (
-                      <label key={id} className="checkbox-label small">
-                        <input
-                          type="checkbox"
-                          checked={settingsForm.rotationGames.includes(id)}
-                          onChange={() => toggleRotationGame(id)}
-                        />
-                        {name}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="hands-per-game">
-                  <label>1ゲームあたりのハンド数:</label>
-                  <select
-                    value={settingsForm.handsPerGame}
-                    onChange={(e) => setSettingsForm(prev => ({ ...prev, handsPerGame: Number(e.target.value) }))}
-                  >
-                    <option value={4}>4ハンド</option>
-                    <option value={6}>6ハンド (半周)</option>
-                    <option value={8}>8ハンド (1周)</option>
-                    <option value={12}>12ハンド (1.5周)</option>
-                    <option value={16}>16ハンド (2周)</option>
-                  </select>
-                </div>
-
-                <button className="action-btn check" onClick={handleSetRotation}>
-                  ローテーション設定を適用
-                </button>
-
-                <div className="rotation-preview">
-                  <p>順序: {settingsForm.rotationGames.join(' → ')}</p>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* ブラインド設定 */}
-          <div className="settings-section">
-            <h4>💰 ブラインド設定</h4>
-            <div className="blinds-inputs">
-              <label>
-                SB:
-                <input
-                  type="number"
-                  value={settingsForm.smallBlind}
-                  onChange={(e) => setSettingsForm(prev => ({ ...prev, smallBlind: Number(e.target.value) }))}
-                  min={1}
-                />
-              </label>
-              <label>
-                BB:
-                <input
-                  type="number"
-                  value={settingsForm.bigBlind}
-                  onChange={(e) => setSettingsForm(prev => ({ ...prev, bigBlind: Number(e.target.value) }))}
-                  min={2}
-                />
-              </label>
-              <label title="Studゲームのブリングイン/アンティ額">
-                Ante:
-                <input
-                  type="number"
-                  value={settingsForm.studAnte}
-                  onChange={(e) => setSettingsForm(prev => ({ ...prev, studAnte: Number(e.target.value) }))}
-                  min={1}
-                />
-              </label>
-              <button className="action-btn check" onClick={handleUpdateBlinds} disabled={!isWaiting}>
-                適用
-              </button>
-            </div>
-          </div>
-
-          {/* メタゲーム設定 */}
-          <div className="settings-section">
-            <h4>🎲 サイドゲーム</h4>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={room?.metaGame?.sevenDeuce ?? false}
-                onChange={handleToggleSevenDeuce}
-              />
-              7-2ゲーム (7-2で勝つとボーナス)
-            </label>
-          </div>
-
-          {isDev && (
-            <div className="settings-section">
-              <h4>🧪 デバッグ</h4>
-              <div className="rotation-preview">
-                <button className="action-btn check" onClick={handleForceNextGame}>
-                  次のゲームへ強制切替
-                </button>
-                <button className="action-btn check" onClick={handleSetRotationOneHand}>
-                  1ハンドごとに切替
-                </button>
-                <button className="action-btn fold" onClick={handleDebugReconnect}>
-                  接続リセット
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* ポーカーテーブル */}
       <PokerTable
@@ -706,8 +400,6 @@ export function Table({
         dealerBtnIndex={room.dealerBtnIndex}
         activePlayerIndex={room.activePlayerIndex}
         yourSocketId={yourSocketId}
-        selectedSeat={selectedSeat}
-        onSeatClick={handleSeatClick}
         showdownResult={showdownResult}
         isRunout={isRunout}
         yourHand={yourHand}
@@ -715,15 +407,12 @@ export function Table({
         maxTimerSeconds={maxTimerSeconds}
       />
 
-      {/* 自分の手札表示は名前領域の上のカードで確認 */}
-      {/* 役名はPlayerSeatコンポーネント内で表示 */}
-
       {/* ドロー交換パネル */}
       {yourHand.length > 0 && isDrawPhase && isSeated && (
         <div className="draw-panel">
           <div className="draw-header">
             <span className="draw-title">
-              {hasDrawnThisRound ? '交換完了 - 他のプレイヤーを待っています...' : 'カードを選択して交換'}
+              {hasDrawnThisRound ? 'Draw complete - waiting for others...' : 'Select cards to discard'}
             </span>
             <span className="hand-rank-display">
               {evaluateHandRank(yourHand, room.gameState.board, room.gameState.gameVariant)}
@@ -731,7 +420,7 @@ export function Table({
           </div>
           {!hasDrawnThisRound && (
             <div className="draw-limit">
-              選択 {selectedDrawCards.length}/{maxDrawCount}
+              Selected {selectedDrawCards.length}/{maxDrawCount}
             </div>
           )}
           <div className="draw-cards">
@@ -743,7 +432,7 @@ export function Table({
               >
                 <Card card={card} size="medium" />
                 {selectedDrawCards.includes(i) && (
-                  <div className="discard-indicator">捨</div>
+                  <div className="discard-indicator">X</div>
                 )}
               </div>
             ))}
@@ -751,21 +440,21 @@ export function Table({
           {!hasDrawnThisRound && (
             <div className="draw-actions">
               <button className="draw-button stand-pat" onClick={() => handleDraw()}>
-                スタンドパット (0枚)
+                Stand Pat (0)
               </button>
               <button
                 className="draw-button draw-selected"
                 onClick={handleDraw}
                 disabled={selectedDrawCards.length === 0}
               >
-                {selectedDrawCards.length}枚交換
+                Draw {selectedDrawCards.length}
               </button>
             </div>
           )}
         </div>
       )}
 
-      {/* アクションパネル - ゲーム中は常時表示 */}
+      {/* アクションパネル */}
       {isSeated && !isWaiting && !showdownResult && !isSittingOut && (
         <ActionPanel
           validActions={validActions}
@@ -787,8 +476,7 @@ export function Table({
         />
       )}
 
-      {/* ショーダウン結果 - 青いパネルを廃止、シンプルに勝者のみ表示 */}
-      {/* ログに詳細が表示されるため、ここでは最小限の情報のみ */}
+      {/* ショーダウン結果 */}
       {showdownResult && showdownResult.winners.length > 0 && (
         <div
           style={{
@@ -807,7 +495,7 @@ export function Table({
           {showdownResult.winners.map((w, i) => (
             <div key={i} style={{ color: '#fff', fontSize: 14 }}>
               <span style={{ color: '#22c55e', fontWeight: 'bold' }}>🏆 {w.playerName}</span>
-              {' が '}
+              {' wins '}
               <span style={{ color: '#fbbf24' }}>+{w.amount.toLocaleString()}</span>
               {w.handRank !== 'Uncontested' && (
                 <span style={{ color: '#9ca3af' }}> ({w.handRank})</span>
@@ -817,60 +505,10 @@ export function Table({
         </div>
       )}
 
-      {/* 着席コントロール */}
-      {!isSeated && (
-        <div className="action-panel seat-panel">
-          <h3 className="seat-panel-title">💺 着席する</h3>
-          <div className="seat-controls">
-            <label className="text-gray">Buy-in:</label>
-            <input
-              type="number"
-              className="bet-input"
-              value={buyInAmount}
-              onChange={(e) => setBuyInAmount(Number(e.target.value))}
-              min={room.config.buyInMin}
-              max={room.config.buyInMax}
-            />
-            <button
-              className="action-btn check"
-              onClick={() => selectedSeat !== null && handleSitDown(selectedSeat)}
-              disabled={selectedSeat === null}
-            >
-              着席
-            </button>
-          </div>
-          {selectedSeat === null && (
-            <p className="seat-hint">テーブル上の空席をクリックして選択してください</p>
-          )}
-        </div>
-      )}
-
-      {/* ゲーム開始ボタン */}
-      {isSeated && isWaiting && seatedPlayerCount >= 2 && (
-        <div className="start-game-area">
-          <button className="action-btn check start-btn" onClick={handleStartGame}>
-            🎮 ゲーム開始
-          </button>
-        </div>
-      )}
-
-      {isSeated && (
-        <div className="start-game-area">
-          <button className="action-btn check start-btn" onClick={handleToggleSitOut}>
-            {isSittingOut ? '▶️ Sit In' : '🪑 Sit Out'}
-          </button>
-          {yourPlayer?.waitingForBB && (
-            <div className="waiting-message">BB待ちで次ハンド参加</div>
-          )}
-          {yourPlayer?.pendingJoin && !yourPlayer?.waitingForBB && (
-            <div className="waiting-message">次ハンドから参加</div>
-          )}
-        </div>
-      )}
-
+      {/* 待機中メッセージ */}
       {isSeated && isWaiting && seatedPlayerCount < 2 && yourStack > 0 && (
         <div className="waiting-message">
-          ゲーム開始には2人以上のプレイヤーが必要です
+          Waiting for more players...
         </div>
       )}
 
@@ -879,11 +517,11 @@ export function Table({
         <div className="rebuy-panel">
           <div className="rebuy-header">
             <span className="rebuy-icon">💸</span>
-            <h3 className="rebuy-title">チップがありません</h3>
+            <h3 className="rebuy-title">Out of chips</h3>
           </div>
-          <p className="rebuy-message">ゲームを続けるにはチップを追加してください</p>
+          <p className="rebuy-message">Add chips to continue playing</p>
           <div className="rebuy-controls">
-            <label className="text-gray">追加額:</label>
+            <label className="text-gray">Amount:</label>
             <input
               type="number"
               className="bet-input"
@@ -895,14 +533,14 @@ export function Table({
             <button
               className="action-btn check"
               onClick={handleRebuy}
-              disabled={rebuyAmount < room.config.buyInMin || rebuyAmount > room.config.buyInMax}
+              disabled={rebuyAmount < (room.config.buyInMin || 0) || rebuyAmount > (room.config.buyInMax || 10000)}
             >
-              💰 チップ追加
+              Add Chips
             </button>
           </div>
           <div className="rebuy-options">
             <button className="action-btn fold small" onClick={handleLeaveRoom}>
-              🚪 退出する
+              Leave Table
             </button>
           </div>
         </div>
@@ -914,9 +552,6 @@ export function Table({
         isCollapsed={isLogCollapsed}
         onToggle={() => setIsLogCollapsed(!isLogCollapsed)}
       />
-
-      {/* バージョン表示 */}
-      <div className="version-badge">v0.3.3</div>
     </div>
   );
 }

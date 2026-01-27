@@ -16,7 +16,6 @@ import { ShowdownManager } from './ShowdownManager.js';
 import { ActionValidator } from './ActionValidator.js';
 import { Dealer } from './Dealer.js';
 import type {
-  CreateRoomRequest,
   JoinRoomRequest,
   SitDownRequest,
   Player as RoomPlayer,
@@ -28,6 +27,9 @@ import { MetaGameManager } from './MetaGameManager.js';
 import { PotManager } from './PotManager.js';
 import { getVariantConfig } from './gameVariants.js';
 import { logEvent, incrementMetric } from './logger.js';
+import authRoutes from './auth/authRoutes.js';
+import { verifyToken } from './auth/authService.js';
+import { findRandomEmptySeat } from './autoSeating.js';
 
 // Phase 3-B: ゲームエンジンインスタンス（部屋ごとに管理）
 const gameEngines: Map<string, GameEngine> = new Map();
@@ -56,9 +58,50 @@ const playerTimeBanks: Map<string, number> = new Map(); // playerId -> chips
 const MAX_TIMER_SECONDS = 30;
 const INITIAL_TIMEBANK_CHIPS = 5;
 const HAND_END_DELAY_MS = 2000;
+const AUTO_START_DELAY_MS = 2000;
 const ACTION_TOKEN_TTL_MS = 35000;
 const ACTION_RATE_LIMIT_WINDOW_MS = 2000;
 const ACTION_RATE_LIMIT_MAX = 6;
+
+// 自動ゲーム開始管理
+const pendingStarts: Map<string, NodeJS.Timeout> = new Map();
+
+function cleanupSocketSession(socketId: string) {
+  clearPlayerTimer(socketId);
+  actionTokens.delete(socketId);
+  actionInFlight.delete(socketId);
+  invalidActionCounts.delete(socketId);
+  actionRateLimit.delete(socketId);
+  playerTimeBanks.delete(socketId);
+}
+
+function cleanupPendingLeavers(roomId: string, io: Server): boolean {
+  const room = roomManager.getRoomById(roomId);
+  if (!room) return true;
+
+  let removed = false;
+  room.players.forEach((player, index) => {
+    if (player?.pendingLeave) {
+      cleanupSocketSession(player.socketId);
+      room.players[index] = null;
+      removed = true;
+    }
+  });
+
+  if (removed) {
+    const allEmpty = room.players.every(p => p === null);
+    if (allEmpty && !room.isPreset) {
+      roomManager.deleteRoom(roomId);
+      gameEngines.delete(roomId);
+      roomActionInFlight.delete(roomId);
+      io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+      return true;
+    }
+    io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+  }
+
+  return false;
+}
 
 // タイマー開始関数
 function startPlayerTimer(roomId: string, playerId: string, io: Server) {
@@ -208,6 +251,11 @@ function processPostAction(roomId: string, room: any, engine: GameEngine, io: Se
     }
 
     room.gameState.status = 'WAITING' as any;
+    if (cleanupPendingLeavers(roomId, io)) {
+      return;
+    }
+    // 次のハンドを自動開始
+    scheduleNextHand(roomId, io);
   }
 
   // 全員に更新を送信
@@ -220,6 +268,78 @@ function processPostAction(roomId: string, room: any, engine: GameEngine, io: Se
       emitYourTurn(roomId, room, engine, io, nextPlayer);
     }
   }
+}
+
+/**
+ * 自動ゲーム開始スケジューラー
+ * 2人以上のACTIVEプレイヤーがいてWAITING状態なら、自動でハンドを開始
+ */
+function scheduleNextHand(roomId: string, io: Server) {
+  // 既存のスケジュールをキャンセル
+  const existing = pendingStarts.get(roomId);
+  if (existing) {
+    clearTimeout(existing);
+    pendingStarts.delete(roomId);
+  }
+
+  const room = roomManager.getRoomById(roomId);
+  if (!room) return;
+
+  // WAITING状態でなければ何もしない
+  if (room.gameState.status !== 'WAITING') return;
+
+  // ACTIVEプレイヤー数を確認（pendingJoinやSIT_OUTは除く）
+  const activePlayers = room.players.filter(p =>
+    p !== null && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
+  );
+
+  if (activePlayers.length < 2) return;
+
+  const timeout = setTimeout(() => {
+    pendingStarts.delete(roomId);
+
+    const currentRoom = roomManager.getRoomById(roomId);
+    if (!currentRoom || currentRoom.gameState.status !== 'WAITING') return;
+
+    // 再度ACTIVEプレイヤー数をチェック
+    const readyPlayers = currentRoom.players.filter(p =>
+      p !== null && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
+    );
+    if (readyPlayers.length < 2) return;
+
+    // GameEngineを取得または作成
+    let engine = gameEngines.get(roomId);
+    if (!engine) {
+      engine = new GameEngine();
+      gameEngines.set(roomId, engine);
+    }
+
+    // ハンドを開始
+    const success = engine.startHand(currentRoom);
+    if (!success) return;
+
+    // 全員にゲーム状態と自分のハンドを送信
+    for (const player of currentRoom.players) {
+      if (player) {
+        io.to(player.socketId).emit('game-started', {
+          room: sanitizeRoomForViewer(currentRoom, player.socketId),
+          yourHand: player.hand
+        });
+      }
+    }
+
+    // アクティブプレイヤーに行動を促す
+    const activePlayer = currentRoom.players[currentRoom.activePlayerIndex];
+    if (activePlayer) {
+      emitYourTurn(roomId, currentRoom, engine, io, activePlayer);
+    }
+
+    console.log(`🎮 Auto-started game in room ${roomId}`);
+    logEvent('auto_start', { roomId, playerCount: readyPlayers.length });
+    incrementMetric('auto_start');
+  }, AUTO_START_DELAY_MS);
+
+  pendingStarts.set(roomId, timeout);
 }
 
 /**
@@ -260,6 +380,91 @@ function getRoomIdFromSocket(socket: any): string | null {
   return roomEntry ? roomEntry.slice(5) : null;
 }
 
+function handleRoomExit(
+  socket: any,
+  roomId: string,
+  io: Server,
+  options: { leaveRoom?: boolean } = {}
+) {
+  const room = roomManager.getRoomById(roomId);
+  cleanupSocketSession(socket.id);
+  const leaveRoom = options.leaveRoom !== false;
+
+  if (!room) {
+    if (leaveRoom) {
+      socket.leave(`room:${roomId}`);
+    }
+    return;
+  }
+
+  const seatIndex = room.players.findIndex(p => p?.socketId === socket.id);
+  if (seatIndex === -1) {
+    if (leaveRoom) {
+      socket.leave(`room:${roomId}`);
+    }
+    return;
+  }
+
+  const player = room.players[seatIndex]!;
+  const isInHand = room.gameState.status !== 'WAITING';
+
+  if (isInHand) {
+    player.pendingLeave = true;
+    player.pendingSitOut = true;
+    player.pendingJoin = false;
+    player.waitingForBB = false;
+    player.disconnected = true;
+
+    const engine = gameEngines.get(roomId);
+    const isActivePlayer = room.activePlayerIndex === seatIndex;
+    let actionProcessed = false;
+
+    if (engine && isActivePlayer && player.status === 'ACTIVE') {
+      const result = engine.processAction(room, {
+        playerId: socket.id,
+        type: 'FOLD' as ActionType,
+        timestamp: Date.now()
+      });
+
+      if (result.success) {
+        processPostAction(roomId, room, engine, io);
+        actionProcessed = true;
+      } else {
+        player.status = 'FOLDED';
+      }
+    } else if (player.status === 'ACTIVE') {
+      player.status = 'FOLDED';
+    }
+
+    if (leaveRoom) {
+      socket.leave(`room:${roomId}`);
+    }
+    if (!actionProcessed) {
+      io.to(`room:${roomId}`).emit('room-state-update', room);
+      io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+    }
+    return;
+  }
+
+  roomManager.standUp(roomId, socket.id);
+  if (leaveRoom) {
+    socket.leave(`room:${roomId}`);
+  }
+
+  const roomStillExists = roomManager.getRoomById(roomId);
+  if (roomStillExists) {
+    io.to(`room:${roomId}`).emit('room-state-update', roomStillExists);
+  } else {
+    gameEngines.delete(roomId);
+    roomActionInFlight.delete(roomId);
+    if (!leaveRoom) {
+      socket.leave(`room:${roomId}`);
+    }
+  }
+
+  io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+}
+
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -284,6 +489,12 @@ app.use(cors({
   },
   credentials: true
 }));
+
+// JSON bodyパーサー
+app.use(express.json());
+
+// 認証APIルート
+app.use('/api/auth', authRoutes);
 
 // ヘルスチェック用エンドポイント（全環境共通）
 app.get('/api/health', (_req, res) => {
@@ -320,42 +531,36 @@ const io = new Server(httpServer, {
   }
 });
 
-io.on('connection', (socket) => {
-  console.log('🔥 Player connected! ID:', socket.id);
-
-  // ========== Phase 3-A: Room Management Events ==========
-
-
-  // 部屋作成
-  socket.on('create-room', (data: CreateRoomRequest) => {
-    try {
-      const roomConfig = data.config;
-      const hostId = data.isPrivate ? socket.id : undefined;
-
-      const room = roomManager.createRoom(hostId, roomConfig, data.customRoomId);
-
-      // 作成者自身をそのRoomの Socket.IO ルームに参加させる
-      socket.join(`room:${room.id}`);
-
-      socket.emit('room-created', {
-        room,
-        yourSocketId: socket.id
-      });
-
-      // ロビーにいる全員に新しい部屋リストを通知
-      io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
-
-      console.log(`📦 Room ${room.id} created by ${data.playerName}`);
-      logEvent('room_created', { roomId: room.id, playerName: data.playerName, isPrivate: data.isPrivate });
-      incrementMetric('room_created', { isPrivate: Boolean(data.isPrivate) });
-    } catch (error: any) {
-      socket.emit('error', { message: error.message });
+// Socket.IO認証ミドルウェア
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (token) {
+    const user = verifyToken(token);
+    if (user) {
+      socket.data.user = user;
+      return next();
     }
-  });
+  }
+  // 認証なしでも接続を許可（ゲスト対応の余地）
+  // ただしuser情報はnull
+  socket.data.user = null;
+  next();
+});
+
+io.on('connection', (socket) => {
+  const user = socket.data.user;
+  console.log(`🔥 Player connected! ID: ${socket.id}, User: ${user?.displayName || 'Guest'}`);
+
+  // ========== Room Management Events ==========
 
   // 部屋参加
   socket.on('join-room', (data: JoinRoomRequest) => {
     try {
+      const existingRoomId = getRoomIdFromSocket(socket);
+      if (existingRoomId && existingRoomId !== data.roomId) {
+        handleRoomExit(socket, existingRoomId, io);
+      }
+
       const room = roomManager.getRoomById(data.roomId);
 
       if (!room) {
@@ -366,6 +571,17 @@ io.on('connection', (socket) => {
       if (data.resumeToken) {
         const existingPlayer = room.players.find(p => p?.resumeToken === data.resumeToken);
         if (existingPlayer) {
+          const previousSocketId = existingPlayer.socketId;
+          if (previousSocketId !== socket.id) {
+            cleanupSocketSession(previousSocketId);
+            const oldSocket = io.sockets.sockets.get(previousSocketId);
+            if (oldSocket) {
+              oldSocket.leave(`room:${data.roomId}`);
+              oldSocket.emit('error', { message: 'Session replaced by reconnection' });
+              oldSocket.disconnect(true);
+            }
+          }
+
           existingPlayer.socketId = socket.id;
           existingPlayer.disconnected = false;
           (socket.data as any).playerName = existingPlayer.name;
@@ -419,28 +635,8 @@ io.on('connection', (socket) => {
   socket.on('leave-room', () => {
     const roomId = getRoomIdFromSocket(socket);
     if (!roomId) return;
-
     try {
-      const room = roomManager.getRoomById(roomId);
-      if (room) {
-        // 着席していれば離席
-        const seatIndex = room.players.findIndex(p => p?.socketId === socket.id);
-        if (seatIndex !== -1) {
-          roomManager.standUp(roomId, socket.id);
-        }
-
-        // Socket.IOのルームから離脱
-        socket.leave(`room:${roomId}`);
-
-        // 部屋がまだ存在すれば更新を通知
-        const roomStillExists = roomManager.getRoomById(roomId);
-        if (roomStillExists) {
-          io.to(`room:${roomId}`).emit('room-state-update', roomStillExists);
-        }
-
-        // ロビーに部屋リスト更新を通知
-        io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
-      }
+      handleRoomExit(socket, roomId, io, { leaveRoom: true });
     } catch (error) {
       // エラーは無視
     }
@@ -502,6 +698,103 @@ io.on('connection', (socket) => {
     }
   });
 
+  // クイック参加（join-room + 自動着席を1アクションで）
+  socket.on('quick-join', (data: { roomId: string; buyIn: number }) => {
+    try {
+      // 既に別の部屋にいる場合は退出
+      const existingRoomId = getRoomIdFromSocket(socket);
+      if (existingRoomId && existingRoomId !== data.roomId) {
+        handleRoomExit(socket, existingRoomId, io);
+      }
+
+      const room = roomManager.getRoomById(data.roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Room not found' });
+        return;
+      }
+
+      // バイイン額チェック
+      const minBuyIn = room.config.buyInMin || room.config.bigBlind * 20;
+      const maxBuyIn = room.config.buyInMax || room.config.bigBlind * 100;
+      if (data.buyIn < minBuyIn || data.buyIn > maxBuyIn) {
+        socket.emit('error', { message: `Buy-in must be between ${minBuyIn} and ${maxBuyIn}` });
+        return;
+      }
+
+      // 既に着席済みかチェック
+      const alreadySeated = room.players.some(p => p?.socketId === socket.id);
+      if (alreadySeated) {
+        socket.emit('error', { message: 'Already seated in this room' });
+        return;
+      }
+
+      // 空席を探す
+      const seatIndex = findRandomEmptySeat(room.players);
+      if (seatIndex === null) {
+        socket.emit('error', { message: 'Room is full' });
+        return;
+      }
+
+      // ユーザー情報を取得
+      const user = socket.data?.user;
+      const playerName = user?.displayName || 'Guest';
+
+      // socket.dataにplayerNameを保存
+      (socket.data as any).playerName = playerName;
+
+      // Socket.IOのルームに参加
+      socket.join(`room:${data.roomId}`);
+      // ロビーから離脱
+      socket.leave('lobby');
+
+      const variantConfig = getVariantConfig(room.gameState.gameVariant);
+      const isWaiting = room.gameState.status === 'WAITING';
+
+      // プレイヤー情報を作成
+      const player: RoomPlayer = {
+        socketId: socket.id,
+        name: playerName,
+        stack: data.buyIn,
+        bet: 0,
+        totalBet: 0,
+        status: (isWaiting ? 'ACTIVE' : 'SIT_OUT') as PlayerStatus,
+        hand: null,
+        pendingJoin: !isWaiting,
+        waitingForBB: !isWaiting && variantConfig.hasButton,
+        disconnected: false,
+        userId: user?.userId,
+        avatarIcon: user?.avatarIcon
+      };
+
+      roomManager.sitDown(data.roomId, seatIndex, player);
+
+      console.log(`⚡ ${playerName} quick-joined room ${data.roomId} at seat ${seatIndex}`);
+      logEvent('quick_join', { roomId: data.roomId, playerName, seatIndex, buyIn: data.buyIn });
+      incrementMetric('quick_join');
+
+      // 参加成功を通知（本人）
+      socket.emit('room-joined', {
+        room: sanitizeRoomForViewer(room, socket.id),
+        yourSocketId: socket.id,
+        yourHand: null
+      });
+      socket.emit('sit-down-success', { seatIndex });
+
+      // 部屋内の全員に更新を通知
+      io.to(`room:${data.roomId}`).emit('room-state-update', room);
+
+      // ロビーに部屋リスト更新を通知
+      io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+
+      // 自動ゲーム開始チェック
+      scheduleNextHand(data.roomId, io);
+
+    } catch (error: any) {
+      console.error(`❌ Quick-join failed: ${error.message}`);
+      socket.emit('error', { message: error.message });
+    }
+  });
+
   // リバイ（チップ追加）
   socket.on('rebuy', (data: { amount: number }) => {
     try {
@@ -559,63 +852,6 @@ io.on('connection', (socket) => {
   });
 
   // ========== Phase 3-B: Game Engine Events ==========
-
-  // ゲーム開始
-  socket.on('start-game', () => {
-    try {
-      const roomId = getRoomIdFromSocket(socket);
-      if (!roomId) {
-        socket.emit('error', { message: 'You are not in any room' });
-        return;
-      }
-
-      const room = roomManager.getRoomById(roomId);
-      if (!room) {
-        socket.emit('error', { message: 'Room not found' });
-        return;
-      }
-
-      // GameEngineを取得または作成
-      let engine = gameEngines.get(roomId);
-      if (!engine) {
-        engine = new GameEngine();
-        gameEngines.set(roomId, engine);
-      }
-
-      // ハンドを開始
-      const success = engine.startHand(room);
-      if (!success) {
-        socket.emit('error', { message: 'Need at least 2 players to start' });
-        return;
-      }
-
-      // 全員にゲーム状態と自分のハンドを送信
-      for (const player of room.players) {
-        if (player) {
-          io.to(player.socketId).emit('game-started', {
-            room: {
-              ...room,
-              players: room.players.map(p => p ? {
-                ...p,
-                hand: p.socketId === player.socketId ? p.hand : null // 自分の手札のみ
-              } : null)
-            },
-            yourHand: player.hand
-          });
-        }
-      }
-
-      // アクティブプレイヤーに行動を促す
-      const activePlayer = room.players[room.activePlayerIndex];
-      if (activePlayer) {
-        emitYourTurn(roomId, room, engine, io, activePlayer);
-      }
-
-      console.log(`🎮 Game started in room ${roomId}`);
-    } catch (error: any) {
-      socket.emit('error', { message: error.message });
-    }
-  });
 
   // タイムバンク使用
   socket.on('use-timebank', () => {
@@ -847,7 +1083,14 @@ io.on('connection', (socket) => {
             room.gameState.runoutPhase = undefined;
             room.gameState.status = 'WAITING' as any;
 
+            if (cleanupPendingLeavers(roomId, io)) {
+              return;
+            }
+
             io.to(`room:${roomId}`).emit('room-state-update', room);
+
+            // 次のハンドを自動開始
+            scheduleNextHand(roomId, io);
           };
 
           // 非同期でランアウトを実行
@@ -894,6 +1137,11 @@ io.on('connection', (socket) => {
           }
 
           room.gameState.status = 'WAITING' as any;
+          if (cleanupPendingLeavers(roomId, io)) {
+            return;
+          }
+          // 次のハンドを自動開始
+          scheduleNextHand(roomId, io);
         }
       }
 
@@ -1192,40 +1440,48 @@ io.on('connection', (socket) => {
   });
 
   // ゲームバリアント即時変更（ローテーション外）
+  const applyGameVariantChange = (variant: string) => {
+    const roomId = getRoomIdFromSocket(socket);
+    if (!roomId) {
+      socket.emit('error', { message: 'You are not in any room' });
+      return;
+    }
+
+    const room = roomManager.getRoomById(roomId);
+    if (!room) {
+      socket.emit('error', { message: 'Room not found' });
+      return;
+    }
+
+    if (room.gameState.status !== 'WAITING') {
+      socket.emit('error', { message: 'Cannot change game while hand is in progress' });
+      return;
+    }
+
+    const validVariants = ['NLH', 'PLO', 'PLO8', '7CS', '7CS8', 'RAZZ', '2-7_TD', 'BADUGI'];
+    if (!validVariants.includes(variant)) {
+      socket.emit('error', { message: `Invalid variant: ${variant}` });
+      return;
+    }
+
+    room.gameState.gameVariant = variant;
+    console.log(`🎮 Room ${roomId}: Game variant changed to ${variant}`);
+
+    io.to(`room:${roomId}`).emit('room-state-update', room);
+    io.to(`room:${roomId}`).emit('game-variant-changed', { variant });
+  };
+
   socket.on('set-game-variant', (data: { variant: string }) => {
     try {
-      const roomId = getRoomIdFromSocket(socket);
-      if (!roomId) {
-        socket.emit('error', { message: 'You are not in any room' });
-        return;
-      }
+      applyGameVariantChange(data.variant);
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
 
-      const room = roomManager.getRoomById(roomId);
-      if (!room) {
-        socket.emit('error', { message: 'Room not found' });
-        return;
-      }
-
-      // ゲーム中は変更不可
-      if (room.gameState.status !== 'WAITING') {
-        socket.emit('error', { message: 'Cannot change game while hand is in progress' });
-        return;
-      }
-
-      // 有効なバリアントかチェック
-      const validVariants = ['NLH', 'PLO', 'PLO8', '7CS', '7CS8', 'RAZZ', '2-7_TD', 'BADUGI'];
-      if (!validVariants.includes(data.variant)) {
-        socket.emit('error', { message: `Invalid variant: ${data.variant}` });
-        return;
-      }
-
-      room.gameState.gameVariant = data.variant;
-      console.log(`🎮 Room ${roomId}: Game variant changed to ${data.variant}`);
-
-      // 全員に更新を通知
-      io.to(`room:${roomId}`).emit('room-state-update', room);
-      io.to(`room:${roomId}`).emit('game-variant-changed', { variant: data.variant });
-
+  socket.on('change-variant', (data: { variant: string }) => {
+    try {
+      applyGameVariantChange(data.variant);
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
@@ -1283,164 +1539,30 @@ io.on('connection', (socket) => {
         socket.emit('error', { message: 'You are not in any room' });
         return;
       }
-
-      roomManager.standUp(roomId, socket.id);
-
-      const room = roomManager.getRoomById(roomId);
-      if (room) {
-        // 部屋内の全員に更新を通知
-        io.to(`room:${roomId}`).emit('room-state-update', room);
-      }
-
-      // ロビーに部屋リスト更新を通知
-      io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+      handleRoomExit(socket, roomId, io, { leaveRoom: false });
 
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
   });
 
-  // シットアウト切替
-  socket.on('sit-out', (data: { enabled: boolean }) => {
-    try {
-      const roomId = getRoomIdFromSocket(socket);
-      if (!roomId) {
-        socket.emit('error', { message: 'You are not in any room' });
-        return;
-      }
-
-      const room = roomManager.getRoomById(roomId);
-      if (!room) {
-        socket.emit('error', { message: 'Room not found' });
-        return;
-      }
-
-      const player = room.players.find(p => p?.socketId === socket.id);
-      if (!player) {
-        socket.emit('error', { message: 'You are not seated' });
-        return;
-      }
-
-      if (data.enabled) {
-        if (room.gameState.status === 'WAITING') {
-          player.status = 'SIT_OUT';
-          player.pendingJoin = false;
-        } else {
-          player.pendingSitOut = true;
-        }
-        console.log(`🪑 ${player.name} set to sit out`);
-        logEvent('sit_out', { roomId, playerName: player.name });
-        incrementMetric('sit_out');
-      } else {
-        player.pendingSitOut = false;
-        if (room.gameState.status === 'WAITING') {
-          player.status = 'ACTIVE';
-          player.pendingJoin = false;
-          player.waitingForBB = false;
-        } else {
-          player.pendingJoin = true;
-        }
-        console.log(`🪑 ${player.name} set to sit in`);
-        logEvent('sit_in', { roomId, playerName: player.name });
-        incrementMetric('sit_in');
-      }
-
-      io.to(`room:${roomId}`).emit('room-state-update', room);
-    } catch (error: any) {
-      socket.emit('error', { message: error.message });
-    }
-  });
-
-  // 切断した時（既存のハンドラを拡張）
+  // 切断した時
   socket.on('disconnect', () => {
     console.log('👋 Player disconnected:', socket.id);
     logEvent('disconnect', { playerId: socket.id });
     incrementMetric('disconnect');
-    clearPlayerTimer(socket.id);
-    actionTokens.delete(socket.id);
-    actionInFlight.delete(socket.id);
-    invalidActionCounts.delete(socket.id);
-    actionRateLimit.delete(socket.id);
 
-    // Phase 3-A: すべての部屋から離席させる
+    // すべての部屋から退出（handleRoomExitがauto-fold + pendingLeave処理を行う）
     const roomIds = Array.from(socket.rooms).filter(r => r.startsWith('room:')).map(r => r.slice(5));
 
     for (const roomId of roomIds) {
       try {
-        const room = roomManager.getRoomById(roomId);
-        if (room) {
-          // F-03: アクティブプレイヤーが切断した場合、自動Fold
-          const playerSeatIndex = room.players.findIndex(p => p?.socketId === socket.id);
-          const isActivePlayer = playerSeatIndex !== -1 &&
-            room.activePlayerIndex === playerSeatIndex &&
-            room.gameState.status !== 'WAITING';
-
-          if (isActivePlayer) {
-            const engine = gameEngines.get(roomId);
-            if (engine) {
-              console.log(`⚠️ Active player disconnected! Auto-folding seat ${playerSeatIndex}`);
-
-              // 自動Foldを処理
-              const result = engine.processAction(room, {
-                playerId: socket.id,
-                type: 'FOLD' as ActionType,
-                timestamp: Date.now()
-              });
-
-              if (result.success) {
-                console.log(`✅ Auto-fold completed for seat ${playerSeatIndex}`);
-
-                // ショーダウンチェック
-                if (room.gameState.status === 'SHOWDOWN') {
-                  const activePlayers = room.players.filter(p =>
-                    p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
-                  );
-
-                  let showdownResult;
-                  if (activePlayers.length === 1) {
-                    showdownResult = showdownManager.awardToLastPlayer(room);
-                  } else {
-                    const calculatedPots = potManager.calculatePots(room.players);
-                    room.gameState.pot = calculatedPots;
-                    showdownResult = showdownManager.executeShowdown(room);
-                  }
-
-                  io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
-                  room.gameState.status = 'WAITING' as any;
-                }
-
-                // 次のアクティブプレイヤーに行動を促す
-                if (room.activePlayerIndex !== -1) {
-                  const nextPlayer = room.players[room.activePlayerIndex];
-                  if (nextPlayer) {
-                    emitYourTurn(roomId, room, engine, io, nextPlayer);
-                  }
-                }
-              }
-            }
-          }
-
-          if (playerSeatIndex !== -1) {
-            const player = room.players[playerSeatIndex];
-            if (player) {
-              player.disconnected = true;
-              if (room.gameState.status === 'WAITING') {
-                player.status = 'SIT_OUT';
-                player.pendingJoin = false;
-              }
-              console.log(`🔌 ${player.name} marked disconnected in room ${roomId}`);
-              logEvent('player_disconnected', { roomId, playerName: player.name, seatIndex: playerSeatIndex });
-              incrementMetric('player_disconnected');
-            }
-            io.to(`room:${roomId}`).emit('room-state-update', room);
-          }
-        }
+        handleRoomExit(socket, roomId, io);
       } catch (error) {
         // エラーは無視（すでに離席済みの可能性）
       }
     }
 
-    // ロビーに部屋リスト更新を通知
     io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
   });
 });
@@ -1449,4 +1571,7 @@ const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 httpServer.listen(Number(PORT), HOST, () => {
   console.log(`\n🚀 Server is running on http://${HOST}:${PORT}`);
+
+  // プリセットルームを初期化
+  roomManager.initializePresetRooms();
 });

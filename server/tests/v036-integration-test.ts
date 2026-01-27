@@ -56,6 +56,29 @@ function waitForEvent(socket: Socket, event: string, timeout = 5000): Promise<an
   });
 }
 
+function waitForEventWhere<T>(
+  socket: Socket,
+  event: string,
+  predicate: (data: T) => boolean,
+  timeout = 5000
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off(event, handler);
+      reject(new Error(`Timeout waiting for ${event}`));
+    }, timeout);
+
+    const handler = (data: T) => {
+      if (!predicate(data)) return;
+      clearTimeout(timer);
+      socket.off(event, handler);
+      resolve(data);
+    };
+
+    socket.on(event, handler);
+  });
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -407,6 +430,213 @@ async function testSocketIntegration() {
 }
 
 // ========================================
+// Integration: Quick-Join
+// ========================================
+
+async function testQuickJoin() {
+  log('Testing INT-02: Quick-Join Flow');
+
+  let playerA: Socket | null = null;
+  let playerB: Socket | null = null;
+
+  try {
+    playerA = await createClient('QuickJoinA');
+    playerB = await createClient('QuickJoinB');
+
+    const createPromise = waitForEvent(playerA, 'room-created');
+    playerA.emit('create-room', {
+      playerName: 'QuickJoinA',
+      config: {
+        maxPlayers: 6,
+        smallBlind: 5,
+        bigBlind: 10,
+        buyInMin: 100,
+        buyInMax: 1000,
+        allowedGames: ['NLH']
+      },
+      isPrivate: false
+    });
+    const roomCreated = await createPromise;
+    const roomId = roomCreated.room.id;
+
+    const joinA = waitForEvent(playerA, 'room-joined');
+    const sitA = waitForEvent(playerA, 'sit-down-success');
+    playerA.emit('quick-join', { roomId, buyIn: 500 });
+    await Promise.all([joinA, sitA]);
+
+    const joinB = waitForEvent(playerB, 'room-joined');
+    const sitB = waitForEvent(playerB, 'sit-down-success');
+    playerB.emit('quick-join', { roomId, buyIn: 500 });
+    await Promise.all([joinB, sitB]);
+
+    const update = await waitForEventWhere<any>(
+      playerA,
+      'room-state-update',
+      (data) => Array.isArray(data.players) && data.players.filter((p: any) => p !== null).length >= 2,
+      7000
+    );
+
+    const seated = update.players.filter((p: any) => p !== null).length;
+    if (seated >= 2) {
+      pass('INT-02', 'Quick-Join Flow', `Seated players: ${seated}`);
+    } else {
+      fail('INT-02', 'Quick-Join Flow', `Unexpected seated count: ${seated}`);
+    }
+  } catch (error: any) {
+    fail('INT-02', 'Quick-Join Flow', error.message);
+  } finally {
+    if (playerA) playerA.disconnect();
+    if (playerB) playerB.disconnect();
+  }
+}
+
+// ========================================
+// Integration: Leave-Room during Hand
+// ========================================
+
+async function testLeaveRoom() {
+  log('Testing INT-03: Leave-Room During Hand');
+
+  let playerA: Socket | null = null;
+  let playerB: Socket | null = null;
+
+  try {
+    playerA = await createClient('LeaveRoomA');
+    playerB = await createClient('LeaveRoomB');
+
+    const createPromise = waitForEvent(playerA, 'room-created');
+    playerA.emit('create-room', {
+      playerName: 'LeaveRoomA',
+      config: {
+        maxPlayers: 6,
+        smallBlind: 5,
+        bigBlind: 10,
+        buyInMin: 100,
+        buyInMax: 1000,
+        allowedGames: ['NLH']
+      },
+      isPrivate: false
+    });
+    const roomCreated = await createPromise;
+    const roomId = roomCreated.room.id;
+
+    const joinPromise = waitForEvent(playerB, 'room-joined');
+    playerB.emit('join-room', { roomId, playerName: 'LeaveRoomB' });
+    await joinPromise;
+
+    const sitA = waitForEvent(playerA, 'sit-down-success');
+    const sitB = waitForEvent(playerB, 'sit-down-success');
+    playerA.emit('sit-down', { seatIndex: 0, buyIn: 500 });
+    playerB.emit('sit-down', { seatIndex: 1, buyIn: 500 });
+    await Promise.all([sitA, sitB]);
+
+    let turnA: any = null;
+    let turnB: any = null;
+    playerA.once('your-turn', (data) => { turnA = data; });
+    playerB.once('your-turn', (data) => { turnB = data; });
+
+    const gameStartedA = waitForEvent(playerA, 'game-started');
+    const gameStartedB = waitForEvent(playerB, 'game-started');
+    playerA.emit('start-game');
+    await Promise.all([gameStartedA, gameStartedB]);
+
+    await sleep(500);
+    if (!turnA && !turnB) {
+      fail('INT-03', 'Leave-Room During Hand', 'No turn event received');
+      return;
+    }
+
+    const activeSocket = turnA ? playerA : playerB;
+    const activeId = activeSocket === playerA ? playerA.id : playerB.id;
+
+    activeSocket!.emit('leave-room');
+
+    const update = await waitForEventWhere<any>(
+      activeSocket === playerA ? playerB : playerA,
+      'room-state-update',
+      (data) => Array.isArray(data.players) && !data.players.some((p: any) => p?.socketId === activeId),
+      7000
+    );
+
+    const stillThere = update.players.some((p: any) => p?.socketId === activeId);
+    if (!stillThere) {
+      pass('INT-03', 'Leave-Room During Hand', 'Leaver removed after hand resolution');
+    } else {
+      fail('INT-03', 'Leave-Room During Hand', 'Leaver still present after leave-room');
+    }
+  } catch (error: any) {
+    fail('INT-03', 'Leave-Room During Hand', error.message);
+  } finally {
+    if (playerA) playerA.disconnect();
+    if (playerB) playerB.disconnect();
+  }
+}
+
+// ========================================
+// Integration: Disconnect Cleanup
+// ========================================
+
+async function testDisconnectCleanup() {
+  log('Testing INT-04: Disconnect Cleanup');
+
+  let playerA: Socket | null = null;
+  let playerB: Socket | null = null;
+
+  try {
+    playerA = await createClient('DisconnectA');
+    playerB = await createClient('DisconnectB');
+
+    const createPromise = waitForEvent(playerA, 'room-created');
+    playerA.emit('create-room', {
+      playerName: 'DisconnectA',
+      config: {
+        maxPlayers: 6,
+        smallBlind: 5,
+        bigBlind: 10,
+        buyInMin: 100,
+        buyInMax: 1000,
+        allowedGames: ['NLH']
+      },
+      isPrivate: false
+    });
+    const roomCreated = await createPromise;
+    const roomId = roomCreated.room.id;
+
+    const joinPromise = waitForEvent(playerB, 'room-joined');
+    playerB.emit('join-room', { roomId, playerName: 'DisconnectB' });
+    await joinPromise;
+
+    const sitA = waitForEvent(playerA, 'sit-down-success');
+    const sitB = waitForEvent(playerB, 'sit-down-success');
+    playerA.emit('sit-down', { seatIndex: 0, buyIn: 500 });
+    playerB.emit('sit-down', { seatIndex: 1, buyIn: 500 });
+    await Promise.all([sitA, sitB]);
+
+    const playerBId = playerB.id;
+    playerB.disconnect();
+
+    const update = await waitForEventWhere<any>(
+      playerA,
+      'room-state-update',
+      (data) => Array.isArray(data.players) && !data.players.some((p: any) => p?.socketId === playerBId),
+      7000
+    );
+
+    const removed = !update.players.some((p: any) => p?.socketId === playerBId);
+    if (removed) {
+      pass('INT-04', 'Disconnect Cleanup', 'Disconnected player removed from room');
+    } else {
+      fail('INT-04', 'Disconnect Cleanup', 'Disconnected player still present');
+    }
+  } catch (error: any) {
+    fail('INT-04', 'Disconnect Cleanup', error.message);
+  } finally {
+    if (playerA) playerA.disconnect();
+    if (playerB && playerB.connected) playerB.disconnect();
+  }
+}
+
+// ========================================
 // Main Test Runner
 // ========================================
 
@@ -429,6 +659,9 @@ async function runAllTests() {
 
   // Integration test
   await testSocketIntegration();
+  await testQuickJoin();
+  await testLeaveRoom();
+  await testDisconnectCleanup();
 
   // Print summary
   console.log('\n========================================');

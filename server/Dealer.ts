@@ -98,6 +98,23 @@ export class Dealer {
     }
 
     /**
+     * 汎用ボードカード配布（バーン1枚 + 指定枚数）
+     * boardPatternに基づくデータ駆動のカード配布
+     */
+    dealBoardCards(deck: string[], count: number): string[] {
+        if (deck.length < count + 1) {
+            throw new Error(`Not enough cards: need ${count + 1}, have ${deck.length}`);
+        }
+
+        deck.shift(); // バーンカード
+        const cards: string[] = [];
+        for (let i = 0; i < count; i++) {
+            cards.push(deck.shift()!);
+        }
+        return cards;
+    }
+
+    /**
      * ディーラーボタンを次のプレイヤーに移動
      * @param room 部屋
      * @returns 新しいボタンのインデックス

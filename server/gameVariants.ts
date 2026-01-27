@@ -3,6 +3,20 @@
  * ゲームごとの設定を定義
  */
 
+export type HandEvaluation =
+    | 'high'        // 通常ハイハンド (NLH, PLO, 7CS)
+    | 'highlow'     // ハイロースプリット (PLO8, 7CS8)
+    | 'razz'        // A-5ローボール (RAZZ)
+    | 'badugi'      // バドゥーギ
+    | '2-7'         // 2-7ローボール
+    | 'a5'          // A-5ローボール (ドロー用)
+    | 'hidugi'      // ハイバドゥーギ (高い方が勝ち)
+    | 'baduecey'    // バドゥーシー (Badugi + 2-7 スプリット)
+    | 'badacey'     // バダシー (Badugi + A-5 スプリット)
+    | 'archie'      // アーチー (A-5 + 2-7 スプリット)
+    | 'razzdugi'    // ラズドゥーギ (Razz + Badugi スプリット)
+    | 'stud27';     // スタッド2-7 (7枚からベスト2-7)
+
 export interface GameVariantConfig {
     id: string;                    // "NLH", "PLO", "2-7_TD", "7CS"
     name: string;                  // 表示名
@@ -12,9 +26,44 @@ export interface GameVariantConfig {
     hasButton: boolean;            // スタッドはボタンなし
     hasDrawPhase: boolean;         // ドローポーカーの交換フェーズ
     handEvaluatorType: 'high' | 'low' | 'high-low' | 'razz';
-    handEvaluation: 'high' | 'highlow' | 'razz' | 'badugi' | '2-7'; // ショーダウン評価タイプ
+    handEvaluation: HandEvaluation; // ショーダウン評価タイプ
     maxDrawCount?: number;         // ドロー交換の最大枚数
     streets: string[];             // ストリート名
+
+    // === β版拡張フィールド ===
+
+    // ドローゲーム: ラウンド数 (1=シングルドロー, 3=トリプルドロー)
+    drawRounds?: number;
+
+    // PLO系: ハンド選択で必ず使う手札枚数 (PLO=2, Big-O=2)
+    holeCardsForSelection?: number;
+
+    // ボードパターン: コミュニティカードの配布枚数 ([3,1,1]標準, [3,1,1,1]Ocean)
+    boardPattern?: number[];
+
+    // ダブルボード: ボード枚数 (1=標準, 2=ダブルボード)
+    boardCount?: number;
+
+    // Oceanカード: 6枚目のコミュニティカード
+    hasOceanCard?: boolean;
+
+    // Dramaha: フロップ+ドローのハイブリッドゲーム
+    isDramaha?: boolean;
+    dramahaDrawEval?: HandEvaluation;  // ドロー部分の評価タイプ
+    dramahaPickem?: boolean;           // Pick'em バリアント
+    dramahaPenalty?: boolean;          // ペナルティルール
+
+    // Cry Me a River: リバー後にカード消失
+    vanishCards?: number;
+
+    // アンティタイプ
+    anteType?: 'blind' | 'ante' | 'button-ante';
+
+    // スタッド: ブリングイン決定 (true=最高ドアカード, false=最低=デフォルト)
+    isBringInHigh?: boolean;
+
+    // 8人トリプルドロー: UTG強制シットアウト
+    forceUtgSitOut?: boolean;
 }
 
 // デフォルトのゲーム設定
@@ -44,6 +93,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasDrawPhase: false,
         handEvaluatorType: 'high',
         handEvaluation: 'high',
+        holeCardsForSelection: 2,
         streets: ['Preflop', 'Flop', 'Turn', 'River']
     },
 
@@ -58,6 +108,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         hasDrawPhase: false,
         handEvaluatorType: 'high-low',
         handEvaluation: 'highlow',
+        holeCardsForSelection: 2,
         streets: ['Preflop', 'Flop', 'Turn', 'River']
     },
 
@@ -73,6 +124,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         handEvaluatorType: 'low',
         handEvaluation: '2-7',
         maxDrawCount: 5,
+        drawRounds: 3,
         streets: ['Pre-Draw', 'First Draw', 'Second Draw', 'Third Draw']
     },
 
@@ -130,6 +182,7 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         handEvaluatorType: 'low',
         handEvaluation: 'badugi',
         maxDrawCount: 4,
+        drawRounds: 3,
         streets: ['Pre-Draw', 'First Draw', 'Second Draw', 'Third Draw']
     }
 };

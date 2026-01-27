@@ -18,8 +18,6 @@ interface PokerTableProps {
   dealerBtnIndex: number;
   activePlayerIndex: number;
   yourSocketId: string;
-  selectedSeat: number | null;
-  onSeatClick: (index: number) => void;
   showdownResult?: ShowdownResult | null;
   isRunout?: boolean;
   yourHand?: string[] | null;
@@ -34,8 +32,6 @@ export const PokerTable = memo(function PokerTable({
   dealerBtnIndex,
   activePlayerIndex,
   yourSocketId,
-  selectedSeat,
-  onSeatClick,
   showdownResult,
   isRunout = false,
   yourHand,
@@ -195,7 +191,6 @@ export const PokerTable = memo(function PokerTable({
           const isBB = index === bbIndex && gameState.status !== 'WAITING';
           const isActive = index === activePlayerIndex && gameState.status === 'PLAYING';
           const isYou = player?.socketId === yourSocketId;
-          const isSelected = selectedSeat === index;
 
           // ショーダウン時のハンド
           const showdownHand = showdownResult?.allHands?.find(h => h.playerId === player?.socketId);
@@ -218,9 +213,7 @@ export const PokerTable = memo(function PokerTable({
               isSB={isSB}
               isBB={isBB}
               isYou={isYou}
-              isSelected={isSelected}
               style={seatStyle}
-              onSeatClick={() => !player && onSeatClick(index)}
               showdownHand={showdownHand?.hand}
               isWinner={isWinner}
               gameVariant={gameState.gameVariant}

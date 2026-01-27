@@ -8,7 +8,7 @@ nixPkgs = ["nodejs_20"]
 cmds = ["npm install --prefix client", "npm install --prefix server"]
 
 [build.nixpacksPlan.phases.build]
-cmds = ["npm run build --prefix client", "npm run build --prefix server"]
+cmds = ["npm run build --prefix client", "cd server && npx prisma generate && npx prisma migrate deploy && npm run build"]
 
 [deploy]
 startCommand = "cd server && npm run start"

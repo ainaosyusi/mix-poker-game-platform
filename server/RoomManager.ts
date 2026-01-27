@@ -13,6 +13,7 @@ import {
     PotState,
     RoomListItem
 } from './types.js';
+import { PRESET_ROOMS, type PresetRoomConfig } from './roomDefinitions.js';
 
 export class RoomManager {
     private rooms: Map<string, Room> = new Map();
@@ -27,21 +28,19 @@ export class RoomManager {
     createRoom(hostId: string | undefined, config: RoomConfig, customRoomId?: string): Room {
         let roomId: string;
 
-        if (hostId) {
-            // Private卓
-            if (customRoomId) {
-                // カスタムIDを使用
-                if (!/^\d{6}$/.test(customRoomId)) {
-                    throw new Error('Room ID must be exactly 6 digits');
-                }
-                if (this.rooms.has(customRoomId)) {
-                    throw new Error('Room ID already exists');
-                }
-                roomId = customRoomId;
-            } else {
-                // Private卓でも部屋番号未指定ならランダム生成
-                roomId = this.generateRoomId();
+        if (customRoomId) {
+            // カスタムIDを使用（プリセットルームまたはPrivate卓）
+            if (this.rooms.has(customRoomId)) {
+                throw new Error('Room ID already exists');
             }
+            // Private卓は6桁数字のみ、プリセットは任意の文字列
+            if (hostId && !/^\d{6}$/.test(customRoomId)) {
+                throw new Error('Room ID must be exactly 6 digits');
+            }
+            roomId = customRoomId;
+        } else if (hostId) {
+            // Private卓でも部屋番号未指定ならランダム生成
+            roomId = this.generateRoomId();
         } else {
             // Open卓: ランダムIDを生成
             roomId = this.generateRoomId();
@@ -96,6 +95,7 @@ export class RoomManager {
     cleanupEmptyRooms(): number {
         let deletedCount = 0;
         for (const [roomId, room] of this.rooms) {
+            if (room.isPreset) continue; // プリセットルームは削除しない
             const playerCount = room.players.filter(p => p !== null).length;
             if (playerCount === 0) {
                 this.rooms.delete(roomId);
@@ -114,14 +114,19 @@ export class RoomManager {
      */
     getAllRooms(): RoomListItem[] {
         return Array.from(this.rooms.values())
-            .filter(room => room.hostId === undefined) // Open部屋のみ
+            .filter(room => room.hostId === undefined) // Open部屋・プリセット部屋のみ
             .map(room => ({
                 id: room.id,
                 playerCount: room.players.filter(p => p !== null).length,
                 maxPlayers: room.config.maxPlayers,
                 gameVariant: room.gameState.gameVariant,
                 blinds: `${room.config.smallBlind}/${room.config.bigBlind}`,
-                isPrivate: false
+                isPrivate: false,
+                buyInMin: room.config.buyInMin,
+                buyInMax: room.config.buyInMax,
+                displayName: room.displayName,
+                category: room.category,
+                rotationGames: room.rotation.enabled ? room.rotation.gamesList : undefined,
             }));
     }
 
@@ -196,9 +201,9 @@ export class RoomManager {
         room.players[seatIndex] = null;
         console.log(`🚶 ${playerName} left seat ${seatIndex} in room ${roomId}`);
 
-        // 部屋が空になったら削除（オプション）
+        // 部屋が空になったら削除（プリセットルームは除外）
         const allEmpty = room.players.every(p => p === null);
-        if (allEmpty) {
+        if (allEmpty && !room.isPreset) {
             this.deleteRoom(roomId);
         }
 
@@ -264,6 +269,36 @@ export class RoomManager {
             id = Math.floor(100000 + Math.random() * 900000).toString();
         } while (this.rooms.has(id)); // 重複チェック
         return id;
+    }
+
+    /**
+     * プリセットルームを初期化
+     * サーバー起動時に呼び出す
+     */
+    initializePresetRooms(): void {
+        for (const preset of PRESET_ROOMS) {
+            if (this.rooms.has(preset.id)) {
+                console.log(`⚠️ Preset room already exists: ${preset.id}`);
+                continue;
+            }
+
+            const room = this.createRoom(undefined, preset.roomConfig, preset.id);
+            room.isPreset = true;
+            room.presetId = preset.id;
+            room.displayName = preset.displayName;
+            room.category = preset.category;
+
+            // ローテーション設定
+            if (preset.rotationConfig) {
+                room.rotation.enabled = preset.rotationConfig.enabled;
+                room.rotation.gamesList = preset.rotationConfig.gamesList;
+                room.rotation.handsPerGame = preset.rotationConfig.handsPerGame;
+                room.gameState.gameVariant = preset.rotationConfig.gamesList[0];
+            }
+
+            console.log(`🏠 Preset room initialized: ${preset.id} (${preset.displayName})`);
+        }
+        console.log(`✅ ${PRESET_ROOMS.length} preset rooms initialized`);
     }
 }
 

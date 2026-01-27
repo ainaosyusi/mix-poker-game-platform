@@ -17,10 +17,8 @@ interface PlayerSeatProps {
   isSB: boolean;
   isBB: boolean;
   isYou: boolean;
-  isSelected?: boolean;
   style: React.CSSProperties;
   chipPositionClass?: string;
-  onSeatClick?: () => void;
   showdownHand?: string[] | null;
   isWinner?: boolean;
   gameVariant?: string;
@@ -111,9 +109,7 @@ export const PlayerSeat = memo(function PlayerSeat({
   isSB,
   isBB,
   isYou,
-  isSelected = false,
   style,
-  onSeatClick,
   showdownHand,
   isWinner = false,
   gameVariant = 'NLH',
@@ -191,10 +187,8 @@ export const PlayerSeat = memo(function PlayerSeat({
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 20,
-          cursor: 'pointer',
           transform: 'translate(-50%, -50%)',
         }}
-        onClick={onSeatClick}
       >
         <div
           style={{
@@ -202,11 +196,10 @@ export const PlayerSeat = memo(function PlayerSeat({
             alignItems: 'center',
             gap: 8,
             padding: '8px 16px',
-            background: isSelected ? 'rgba(16, 185, 129, 0.2)' : 'rgba(17, 24, 39, 0.8)',
+            background: 'rgba(17, 24, 39, 0.8)',
             backdropFilter: 'blur(8px)',
             borderRadius: 999,
-            border: isSelected ? '2px solid #10b981' : '2px dashed #4b5563',
-            transition: 'all 0.2s',
+            border: '2px dashed #4b5563',
             minWidth: 120,
           }}
         >
@@ -225,7 +218,7 @@ export const PlayerSeat = memo(function PlayerSeat({
             <span style={{ color: '#6b7280', fontSize: 14 }}>+</span>
           </div>
           <span style={{ color: '#9ca3af', fontSize: 12 }}>
-            {isSelected ? '選択中' : `空席 ${seatIndex + 1}`}
+            Empty
           </span>
         </div>
       </div>

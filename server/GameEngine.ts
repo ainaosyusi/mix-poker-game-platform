@@ -465,37 +465,37 @@ export class GameEngine {
     }
 
     /**
-     * Flop系ゲーム（NLH, PLO）のストリート進行
+     * Flop系ゲームのストリート進行（データ駆動）
+     * boardPatternに基づいてボードカードを配布
      */
     private nextFlopStreet(room: Room, phase: any): void {
-        switch (phase) {
-            case 'PREFLOP':
-                room.gameState.status = 'FLOP' as any;
-                room.gameState.board = this.dealer.dealFlop(this.deck);
-                room.gameState.street = 1;
-                console.log(`🃏 Flop: ${room.gameState.board.join(' ')}`);
-                break;
+        const variantConfig = getVariantConfig(room.gameState.gameVariant);
+        const boardPattern = variantConfig.boardPattern || [3, 1, 1];
+        // フェーズ名の配列（street indexに対応）
+        const FLOP_PHASES = ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'OCEAN'];
 
-            case 'FLOP':
-                room.gameState.status = 'TURN' as any;
-                room.gameState.board.push(this.dealer.dealTurn(this.deck));
-                room.gameState.street = 2;
-                console.log(`🃏 Turn: ${room.gameState.board[3]}`);
-                break;
+        const currentStreet = room.gameState.street;
+        const nextStreet = currentStreet + 1;
 
-            case 'TURN':
-                room.gameState.status = 'RIVER' as any;
-                room.gameState.board.push(this.dealer.dealRiver(this.deck));
-                room.gameState.street = 3;
-                console.log(`🃏 River: ${room.gameState.board[4]}`);
-                break;
-
-            case 'RIVER':
-                room.gameState.status = 'SHOWDOWN' as any;
-                room.gameState.street = 4;
-                this.endHand(room);
-                break;
+        // 全ボードカードが配布済み → ショーダウン
+        if (nextStreet > boardPattern.length) {
+            room.gameState.status = 'SHOWDOWN' as any;
+            room.gameState.street = nextStreet;
+            this.endHand(room);
+            return;
         }
+
+        // 次のフェーズに進行
+        const nextPhase = FLOP_PHASES[nextStreet] || 'SHOWDOWN';
+        room.gameState.status = nextPhase as any;
+        room.gameState.street = nextStreet;
+
+        // ボードカードを配布
+        const cardCount = boardPattern[nextStreet - 1]; // boardPattern[0]=flop, [1]=turn, [2]=river, [3]=ocean
+        const newCards = this.dealer.dealBoardCards(this.deck, cardCount);
+        room.gameState.board.push(...newCards);
+
+        console.log(`🃏 ${nextPhase}: ${newCards.join(' ')} (board: ${room.gameState.board.join(' ')})`);
     }
 
     /**
@@ -545,48 +545,31 @@ export class GameEngine {
      * ベッティング完了後、ドロー交換フェーズに入る
      */
     private nextDrawStreet(room: Room, phase: any): void {
-        // ベッティング完了後、ドロー交換フェーズに入る
-        // 最後のラウンド（THIRD_DRAW）はそのままショーダウンへ
-        switch (phase) {
-            case 'PREFLOP': // 便宜上PREFLOPとして開始
-            case 'PREDRAW':
-                // PREDRAW ベッティング完了 → 1st Draw 交換フェーズへ
-                room.gameState.status = 'FIRST_DRAW' as any;
-                room.gameState.street = 1;
-                room.gameState.isDrawPhase = true;
-                room.gameState.playersCompletedDraw = [];
-                this.autoCompleteAllInDraws(room);
-                console.log(`🔄 First Draw exchange phase - waiting for players to draw`);
-                break;
+        const variantConfig = getVariantConfig(room.gameState.gameVariant);
+        const drawRounds = variantConfig.drawRounds || 3; // デフォルト: トリプルドロー
+        const DRAW_PHASES = ['PREDRAW', 'FIRST_DRAW', 'SECOND_DRAW', 'THIRD_DRAW'];
 
-            case 'FIRST_DRAW':
-                // FIRST_DRAW ベッティング完了 → 2nd Draw 交換フェーズへ
-                room.gameState.status = 'SECOND_DRAW' as any;
-                room.gameState.street = 2;
-                room.gameState.isDrawPhase = true;
-                room.gameState.playersCompletedDraw = [];
-                this.autoCompleteAllInDraws(room);
-                console.log(`🔄 Second Draw exchange phase - waiting for players to draw`);
-                break;
+        const currentStreet = room.gameState.street;
+        // PREFLOP/PREDRAWはstreet 0
+        const nextStreet = (phase === 'PREFLOP' || phase === 'PREDRAW') ? 1 : currentStreet + 1;
 
-            case 'SECOND_DRAW':
-                // SECOND_DRAW ベッティング完了 → 3rd Draw 交換フェーズへ
-                room.gameState.status = 'THIRD_DRAW' as any;
-                room.gameState.street = 3;
-                room.gameState.isDrawPhase = true;
-                room.gameState.playersCompletedDraw = [];
-                this.autoCompleteAllInDraws(room);
-                console.log(`🔄 Third Draw exchange phase - waiting for players to draw`);
-                break;
-
-            case 'THIRD_DRAW':
-                // THIRD_DRAW ベッティング完了 → ショーダウン
-                room.gameState.status = 'SHOWDOWN' as any;
-                room.gameState.street = 4;
-                room.gameState.isDrawPhase = false;
-                this.endHand(room);
-                break;
+        if (nextStreet > drawRounds) {
+            // 全ドローラウンド完了 → ショーダウン
+            room.gameState.status = 'SHOWDOWN' as any;
+            room.gameState.street = nextStreet;
+            room.gameState.isDrawPhase = false;
+            this.endHand(room);
+            return;
         }
+
+        // 次のドロー交換フェーズへ
+        const nextPhase = DRAW_PHASES[nextStreet];
+        room.gameState.status = nextPhase as any;
+        room.gameState.street = nextStreet;
+        room.gameState.isDrawPhase = true;
+        room.gameState.playersCompletedDraw = [];
+        this.autoCompleteAllInDraws(room);
+        console.log(`🔄 ${nextPhase} exchange phase - waiting for players to draw`);
     }
 
     /**
@@ -882,16 +865,23 @@ export class GameEngine {
             return smallBet;
         }
 
-        // Draw系: 2nd Draw以降はBig Bet
+        // Draw系: 後半のベッティングラウンドはBig Bet
         if (variantConfig.hasDrawPhase) {
-            if (phase === 'SECOND_DRAW' || phase === 'THIRD_DRAW') {
+            const drawRounds = variantConfig.drawRounds || 3;
+            // ベッティングラウンド数 = drawRounds + 1 (predraw + 各ドロー後)
+            // Big Betは後半から: Math.ceil((drawRounds+1) / 2)
+            // 3ラウンド: street 2,3 = Big Bet (SECOND_DRAW, THIRD_DRAW)
+            const bigBetStartStreet = Math.ceil((drawRounds + 1) / 2);
+            if (room.gameState.street >= bigBetStartStreet) {
                 return bigBet;
             }
             return smallBet;
         }
 
-        // Flop系: Turn/River はBig Bet
-        if (phase === 'TURN' || phase === 'RIVER') {
+        // Flop系: 後半のストリートはBig Bet
+        // 標準[3,1,1]: street 2(Turn),3(River) = Big Bet
+        // Ocean[3,1,1,1]: street 2(Turn),3(River),4(Ocean) = Big Bet
+        if (room.gameState.street >= 2) {
             return bigBet;
         }
 
@@ -947,29 +937,31 @@ export class GameEngine {
     }
 
     /**
-     * Flop系ゲームのオートディール
+     * Flop系ゲームのオートディール（全ボードカードを一気に配布）
+     * boardPatternに基づいてデータ駆動
      */
     private dealFlopToShowdown(room: Room, phase: any): void {
-        if (phase === 'PREFLOP') {
-            room.gameState.board = this.dealer.dealFlop(this.deck);
-            console.log(`🃏 Auto-Flop: ${room.gameState.board.join(' ')}`);
-            room.gameState.board.push(this.dealer.dealTurn(this.deck));
-            console.log(`🃏 Auto-Turn: ${room.gameState.board[3]}`);
-            room.gameState.board.push(this.dealer.dealRiver(this.deck));
-            console.log(`🃏 Auto-River: ${room.gameState.board[4]}`);
-        } else if (phase === 'FLOP') {
-            room.gameState.board.push(this.dealer.dealTurn(this.deck));
-            console.log(`🃏 Auto-Turn: ${room.gameState.board[3]}`);
-            room.gameState.board.push(this.dealer.dealRiver(this.deck));
-            console.log(`🃏 Auto-River: ${room.gameState.board[4]}`);
-        } else if (phase === 'TURN') {
-            room.gameState.board.push(this.dealer.dealRiver(this.deck));
-            console.log(`🃏 Auto-River: ${room.gameState.board[4]}`);
+        const variantConfig = getVariantConfig(room.gameState.gameVariant);
+        const boardPattern = variantConfig.boardPattern || [3, 1, 1];
+        const FLOP_PHASES = ['PREFLOP', 'FLOP', 'TURN', 'RIVER', 'OCEAN'];
+
+        const currentStreet = room.gameState.street;
+
+        // 残りのストリートを全て配布
+        for (let streetIdx = currentStreet + 1; streetIdx <= boardPattern.length; streetIdx++) {
+            const cardCount = boardPattern[streetIdx - 1];
+            const newCards = this.dealer.dealBoardCards(this.deck, cardCount);
+            room.gameState.board.push(...newCards);
+            const phaseName = FLOP_PHASES[streetIdx] || `Street${streetIdx}`;
+            console.log(`🃏 Auto-${phaseName}: ${newCards.join(' ')}`);
         }
-        // RIVERの場合はそのまま（既にボードは完成している）
-        // それ以外は状態をRIVERに設定
-        if (phase !== 'RIVER') {
-            room.gameState.status = 'RIVER' as any;
+
+        // 最後のフェーズに状態を設定
+        const lastStreet = boardPattern.length;
+        const lastPhase = FLOP_PHASES[lastStreet] || 'RIVER';
+        if (currentStreet < lastStreet) {
+            room.gameState.status = lastPhase as any;
+            room.gameState.street = lastStreet;
         }
     }
 

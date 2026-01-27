@@ -311,7 +311,8 @@ export class ShowdownManager {
      */
     private executeHighShowdown(room: Room, players: Player[], board: string[]): ShowdownResult {
         const variant = room.gameState.gameVariant;
-        const isPLO = variant === 'PLO' || variant === 'PLO8';
+        const variantConfig = getVariantConfig(variant);
+        const useOmahaSelection = variantConfig.holeCardsForSelection !== undefined;
         const isAllInShowdown = this.hasAllInPlayer(room);
 
         // ショーダウン順序を決定
@@ -322,9 +323,9 @@ export class ShowdownManager {
             const holeCards = parseCards(player.hand!);
             const boardCards = parseCards(board);
 
-            // PLO: 手札2枚 + ボード3枚の組み合わせ
-            // NLH: 7枚から最強の5枚
-            const bestFive = isPLO
+            // Omaha系: 手札から必ずN枚使用 + ボード3枚の組み合わせ
+            // Hold'em系: 全カードから最強の5枚
+            const bestFive = useOmahaSelection
                 ? getBestPLOFiveCards(holeCards, boardCards)
                 : getBestFiveCards([...holeCards, ...boardCards]);
 
@@ -433,7 +434,8 @@ export class ShowdownManager {
      */
     private executeHiLoShowdown(room: Room, players: Player[], board: string[]): ShowdownResult {
         const variant = room.gameState.gameVariant;
-        const isPLO8 = variant === 'PLO8';
+        const variantConfig = getVariantConfig(variant);
+        const useOmahaSelection = variantConfig.holeCardsForSelection !== undefined;
         const isAllInShowdown = this.hasAllInPlayer(room);
         const orderedPlayers = this.getShowdownOrder(room, players);
 
@@ -442,9 +444,9 @@ export class ShowdownManager {
             const holeCards = parseCards(player.hand!);
             const boardCards = parseCards(board);
 
-            // PLO8: 手札2枚 + ボード3枚の組み合わせ
-            // 7CS8: 7枚から最強の5枚
-            const bestFive = isPLO8
+            // Omaha系: 手札から必ずN枚使用 + ボード3枚の組み合わせ
+            // Stud系: 全カードから最強の5枚
+            const bestFive = useOmahaSelection
                 ? getBestPLOFiveCards(holeCards, boardCards)
                 : getBestFiveCards([...holeCards, ...boardCards]);
 
@@ -457,9 +459,9 @@ export class ShowdownManager {
             const holeCards = parseCards(player.hand!);
             const boardCards = parseCards(board);
 
-            // PLO8: 手札2枚 + ボード3枚の組み合わせ
-            // 7CS8: 7枚から最強の5枚
-            const bestLowFive = isPLO8
+            // Omaha系: 手札から必ずN枚使用 + ボード3枚の組み合わせ
+            // Stud系: 全カードから最強の5枚
+            const bestLowFive = useOmahaSelection
                 ? getBestPLOLowFiveCards(holeCards, boardCards)
                 : getBestLowFiveCards([...holeCards, ...boardCards]);
 

@@ -17,14 +17,51 @@ export interface RoomConfig {
 }
 
 export type GameVariant =
+    // Flop Games (既存)
     | 'NLH'
     | 'PLO'
     | 'PLO8'
+    // Flop Games (β版追加)
+    | 'BIG_O'              // 5-Card PLO
+    | 'FLO8'               // Fixed-Limit Omaha Hi-Lo
+    | 'PLO_OCEAN'          // PLO Ocean
+    | 'PLO8_OCEAN'         // PLO8 Ocean
+    | 'PLO_DB'             // PLO Double Board
+    | 'FL_DRAMAHA_27'      // Dramaha 2-7
+    | 'FL_DRAMAHA_HI'      // Dramaha Hi
+    | 'FL_DRAMAHA_BADUGI'  // Dramaha Badugi
+    | 'FL_DRAMAHA_HIDUGI'  // Dramaha Hidugi
+    | 'FL_DRAMAHA_49'      // Dramaha 49
+    | 'FL_DRAMAHA_0'       // Dramaha 0
+    | 'FL_DRAMAHA_PICKEM'  // Dramaha Pick'em
+    | 'PL_CMRIVER1'        // Cry Me a River (1 vanish)
+    | 'PL_CMRIVER2'        // Cry Me a River (2 vanish)
+    // Stud Games (既存)
     | '7CS'
     | '7CS8'
     | 'RAZZ'
+    // Stud Games (β版追加)
+    | 'FL_STUD_27'         // Stud 2-7 Razz
+    | 'FL_STUD_RAZZDUGI'   // Stud Razzdugi
+    | 'FL_SS_HI'           // Super Stud Hi
+    | 'FL_SS_RAZZ'         // Super Stud Razz
+    | 'FL_SS_HILO8'        // Super Stud Hi-Lo 8
+    | 'FL_SS_HILOR'        // Super Stud Hi-Lo Regular
+    | 'FL_SS_27'           // Super Stud 2-7
+    | 'FL_SS_RAZZDUGI'     // Super Stud Razzdugi
+    // Draw Games (既存)
     | '2-7_TD'
-    | 'BADUGI';
+    | 'BADUGI'
+    // Draw Games (β版追加)
+    | 'NL_27_SD_NA'        // NL 2-7 Single Draw (No Ante)
+    | 'NL_27_SD_15A'       // NL 2-7 Single Draw (1.5 Ante)
+    | 'FL_A5_TD'           // A-5 Triple Draw
+    | 'FL_HIDUGI'          // Hidugi
+    | 'FL_BADUECEY'        // Baduecey Triple Draw
+    | 'FL_BADACEY'         // Badacey Triple Draw
+    | 'FL_ARCHIE'          // Archie Triple Draw
+    | 'NL_5HI_SD'          // NL 5-Card Hi Single Draw
+    | 'PL_BADUGI';         // PL Badugi
 
 // ========== Pot State ==========
 
@@ -55,6 +92,11 @@ export interface Player {
     waitingForBB?: boolean;    // BB待ち
     pendingSitOut?: boolean;   // ハンド終了後にSit Out
     disconnected?: boolean;    // 切断中
+    pendingLeave?: boolean;    // ハンド終了後に退室
+
+    // アカウント情報
+    userId?: string;           // DBのユーザーID（認証済みの場合）
+    avatarIcon?: string;       // プリセットアバターアイコン
 
     // ゲーム固有情報（オプショナル）
     drawDiscards?: number;     // ドローゲームで何枚交換したか
@@ -90,6 +132,8 @@ export interface GameState {
     // All-In Runout用
     isRunout?: boolean;        // true = オールインランアウト中
     runoutPhase?: string;      // ランアウト開始時のフェーズ
+    // β版追加: ダブルボード用
+    board2?: string[];         // セカンドボード (Double Board バリアント)
 }
 
 // ========== Rotation Management ==========
@@ -137,6 +181,12 @@ export interface Room {
 
     // メタ情報
     createdAt: number;                  // 部屋作成時刻（タイムスタンプ）
+
+    // プリセットルーム情報
+    isPreset?: boolean;                 // サーバー作成のプリセットルームか
+    presetId?: string;                  // プリセットルームID (例: "nlh-1-2")
+    displayName?: string;              // 表示名 (例: "NLH 1/2")
+    category?: 'nlh' | 'mix';         // ルームカテゴリ
 }
 
 // ========== Socket Event Payloads ==========
@@ -183,6 +233,11 @@ export interface RoomListItem {
     gameVariant: string;
     blinds: string;                     // 例: "5/10"
     isPrivate: boolean;
+    buyInMin?: number;
+    buyInMax?: number;
+    displayName?: string;              // プリセットルーム表示名
+    category?: 'nlh' | 'mix';         // ルームカテゴリ
+    rotationGames?: string[];          // ローテーションゲーム一覧
 }
 
 export interface ErrorResponse {
@@ -215,6 +270,9 @@ export type GamePhase =
     | 'FLOP'         // フロップ
     | 'TURN'         // ターン
     | 'RIVER'        // リバー
+    // β版追加: Ocean / Dramaha / Cry Me a River フェーズ
+    | 'OCEAN'          // Oceanカード (6枚目のコミュニティカード)
+    | 'DRAMAHA_DRAW'   // Dramahaドロー交換フェーズ (リバー後)
     // Stud フェーズ
     | 'THIRD_STREET'   // 3rd Street (2 down + 1 up)
     | 'FOURTH_STREET'  // 4th Street (1 up)
