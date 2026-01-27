@@ -296,7 +296,8 @@ if (isProduction) {
   app.use(express.static(clientDistPath));
 
   // API以外のリクエストはindex.htmlを返す（SPA対応）
-  app.get('*', (req, res, next) => {
+  // Express 5ではワイルドカードに名前付きパラメータが必要
+  app.get('/{*splat}', (req, res, next) => {
     // Socket.IOやAPIリクエストは除外
     if (req.path.startsWith('/socket.io') || req.path.startsWith('/api/')) {
       return next();
