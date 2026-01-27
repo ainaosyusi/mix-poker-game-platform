@@ -285,21 +285,25 @@ app.use(cors({
   credentials: true
 }));
 
+// ヘルスチェック用エンドポイント（全環境共通）
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', message: 'Mix Poker Game Server is running' });
+});
+
 // 本番環境: 静的ファイル配信
 if (isProduction) {
-  const clientDistPath = path.join(__dirname, '../client/dist');
+  const clientDistPath = path.join(__dirname, '../../client/dist');
   app.use(express.static(clientDistPath));
 
   // API以外のリクエストはindex.htmlを返す（SPA対応）
   app.get('*', (req, res, next) => {
     // Socket.IOやAPIリクエストは除外
-    if (req.path.startsWith('/socket.io')) {
+    if (req.path.startsWith('/socket.io') || req.path.startsWith('/api/')) {
       return next();
     }
     res.sendFile(path.join(clientDistPath, 'index.html'));
   });
 } else {
-  // 開発環境: Health check endpoint
   app.get('/', (req, res) => {
     res.json({ status: 'ok', message: 'Mix Poker Game Server is running' });
   });
@@ -1441,6 +1445,7 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-httpServer.listen(PORT, () => {
-  console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
+const HOST = '0.0.0.0';
+httpServer.listen(Number(PORT), HOST, () => {
+  console.log(`\n🚀 Server is running on http://${HOST}:${PORT}`);
 });
