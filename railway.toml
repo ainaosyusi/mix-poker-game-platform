@@ -1,10 +1,14 @@
 [build]
 builder = "nixpacks"
 
-[build.nixpacksPlan]
-phases.setup = ["npm:20"]
-phases.install = ["npm install --prefix client", "npm install --prefix server"]
-phases.build = ["npm run build --prefix client", "npm run build --prefix server"]
+[build.nixpacksPlan.phases.setup]
+nixPkgs = ["nodejs-20_x", "npm-9_x"]
+
+[build.nixpacksPlan.phases.install]
+cmds = ["npm install --prefix client", "npm install --prefix server"]
+
+[build.nixpacksPlan.phases.build]
+cmds = ["npm run build --prefix client", "npm run build --prefix server"]
 
 [deploy]
 startCommand = "cd server && npm run start"
