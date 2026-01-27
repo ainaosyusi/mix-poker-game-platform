@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [build.nixpacksPlan.phases.setup]
-nixPkgs = ["nodejs-20_x", "npm-9_x"]
+nixPkgs = ["nodejs_20"]
 
 [build.nixpacksPlan.phases.install]
 cmds = ["npm install --prefix client", "npm install --prefix server"]
