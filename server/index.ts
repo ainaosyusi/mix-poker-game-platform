@@ -292,9 +292,9 @@ function scheduleNextHand(roomId: string, io: Server) {
   // WAITING状態でなければ何もしない
   if (room.gameState.status !== 'WAITING') return;
 
-  // ACTIVEプレイヤー数を確認（pendingJoinやSIT_OUTは除く）
+  // ACTIVEプレイヤー数を確認（pendingJoinやSIT_OUT、スタック0は除く）
   const activePlayers = room.players.filter(p =>
-    p !== null && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
+    p !== null && p.stack > 0 && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
   );
 
   if (activePlayers.length < 2) return;
@@ -305,9 +305,9 @@ function scheduleNextHand(roomId: string, io: Server) {
     const currentRoom = roomManager.getRoomById(roomId);
     if (!currentRoom || currentRoom.gameState.status !== 'WAITING') return;
 
-    // 再度ACTIVEプレイヤー数をチェック
+    // 再度ACTIVEプレイヤー数をチェック（スタック0のプレイヤーを除外）
     const readyPlayers = currentRoom.players.filter(p =>
-      p !== null && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
+      p !== null && p.stack > 0 && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
     );
     if (readyPlayers.length < 2) return;
 
@@ -705,7 +705,7 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
         return;
       }
       scheduleNextHand(roomId, io);
-    }, 1500);
+    }, 2500);
   };
 
   scheduleRunout();
@@ -754,7 +754,7 @@ function handleNormalShowdown(roomId: string, room: any, io: Server) {
       return;
     }
     scheduleNextHand(roomId, io);
-  }, 1500);
+  }, 2500);
 }
 
 function maybeHandleShowdown(roomId: string, room: any, io: Server): boolean {

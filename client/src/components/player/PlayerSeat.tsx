@@ -603,6 +603,24 @@ export const PlayerSeat = memo(function PlayerSeat({
           }}
         >
           <ChipStack amount={player.bet} animate={chipAnimate} />
+
+          {/* ALL-INマーカー（赤い三角）- チップの横に配置 */}
+          {isAllIn && (
+            <div
+              style={{
+                position: 'absolute',
+                top: -10,
+                right: -25,
+                width: 0,
+                height: 0,
+                borderLeft: '12px solid transparent',
+                borderRight: '12px solid transparent',
+                borderBottom: '20px solid #dc2626',
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))',
+                animation: 'allinPulse 1.5s ease-in-out infinite',
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -620,6 +638,17 @@ export const PlayerSeat = memo(function PlayerSeat({
           100% {
             opacity: 1;
             transform: scale(1) translateY(0) rotate(0deg);
+          }
+        }
+
+        @keyframes allinPulse {
+          0%, 100% {
+            opacity: 1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.7;
+            transform: scale(1.1);
           }
         }
       `}</style>
