@@ -4,7 +4,7 @@
 // 自動着席・自動開始対応版
 // ========================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Socket } from 'socket.io-client';
 import { PokerTable } from './components/table/PokerTable';
 import { ActionPanel } from './components/action/ActionPanel';
@@ -89,6 +89,12 @@ export function Table({
   const [timeBankChips, setTimeBankChips] = useState(5);
   const maxTimerSeconds = 30;
   const maxDrawCount = room ? (DRAW_MAX_BY_VARIANT[room.gameState.gameVariant] || 5) : 5;
+
+  // socketをrefで追跡（アンマウント時に最新のsocketを参照するため）
+  const socketRef = useRef(socket);
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
 
   // ログを追加するヘルパー
   const addLog = useCallback((entry: LogEntry) => {
@@ -216,9 +222,6 @@ export function Table({
     });
 
     return () => {
-      // コンポーネントアンマウント時にルームから退出
-      socket.emit('leave-room');
-
       // イベントリスナーをクリーンアップ
       socket.off('room-state-update');
       socket.off('room-joined');
@@ -236,6 +239,15 @@ export function Table({
       socket.off('timebank-update');
     };
   }, [socket, actionToken]);
+
+  // コンポーネントアンマウント時のみルームから退出
+  useEffect(() => {
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.emit('leave-room');
+      }
+    };
+  }, []); // 空の依存配列 = マウント/アンマウント時のみ実行
 
   // タイマーカウントダウン
   useEffect(() => {
