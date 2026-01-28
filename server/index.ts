@@ -721,11 +721,37 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // 既に着席済みかチェック
-      const alreadySeated = room.players.some(p => p?.socketId === socket.id);
-      if (alreadySeated) {
-        socket.emit('error', { message: 'Already seated in this room' });
-        return;
+      // ユーザー情報を取得
+      const user = socket.data?.user;
+      const playerName = user?.displayName || 'Guest';
+
+      // 既に着席済みかチェック（socket.idまたはuserId）
+      const existingPlayerIndex = room.players.findIndex(p => {
+        if (!p) return false;
+        if (p.socketId === socket.id) return true;
+        if (user?.userId && p.userId === user.userId) return true;
+        return false;
+      });
+
+      if (existingPlayerIndex !== -1) {
+        // 既存プレイヤーを削除（古いセッション）
+        const oldPlayer = room.players[existingPlayerIndex]!;
+        console.log(`🔄 Removing old session for ${oldPlayer.name} (old: ${oldPlayer.socketId}, new: ${socket.id})`);
+
+        // ハンド中の場合はフォールド処理
+        if (room.gameState.status !== 'WAITING') {
+          const engine = gameEngines.get(data.roomId);
+          if (engine && room.activePlayerIndex === existingPlayerIndex && oldPlayer.status === 'ACTIVE') {
+            engine.processAction(room, {
+              playerId: oldPlayer.socketId,
+              type: 'FOLD' as ActionType,
+              timestamp: Date.now()
+            });
+          }
+        }
+
+        // プレイヤーを削除
+        room.players[existingPlayerIndex] = null;
       }
 
       // 空席を探す
@@ -734,10 +760,6 @@ io.on('connection', (socket) => {
         socket.emit('error', { message: 'Room is full' });
         return;
       }
-
-      // ユーザー情報を取得
-      const user = socket.data?.user;
-      const playerName = user?.displayName || 'Guest';
 
       // socket.dataにplayerNameを保存
       (socket.data as any).playerName = playerName;
