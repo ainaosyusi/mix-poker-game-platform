@@ -134,6 +134,10 @@ export function useTableSocketEvents({
       addLog(createEventLog('info', `Added ${data.amount} chips (total: ${data.newStack})`));
     };
 
+    const handleImBackSuccess = (data: { message: string }) => {
+      addLog(createEventLog('info', "You're back in the game!"));
+    };
+
     const handleDrawComplete = (data: { newHand: string[] }) => {
       setYourHand(data.newHand);
       setHasDrawnThisRound(true);
@@ -189,6 +193,7 @@ export function useTableSocketEvents({
     socket.on('action-invalid', handleActionInvalid);
     socket.on('sit-down-success', handleSitDownSuccess);
     socket.on('rebuy-success', handleRebuySuccess);
+    socket.on('im-back-success', handleImBackSuccess);
     socket.on('draw-complete', handleDrawComplete);
     socket.on('player-drew', handlePlayerDrew);
     socket.on('runout-started', handleRunoutStarted);
@@ -205,6 +210,7 @@ export function useTableSocketEvents({
       socket.off('action-invalid', handleActionInvalid);
       socket.off('sit-down-success', handleSitDownSuccess);
       socket.off('rebuy-success', handleRebuySuccess);
+      socket.off('im-back-success', handleImBackSuccess);
       socket.off('draw-complete', handleDrawComplete);
       socket.off('player-drew', handlePlayerDrew);
       socket.off('runout-started', handleRunoutStarted);

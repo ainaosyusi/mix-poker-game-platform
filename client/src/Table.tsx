@@ -175,6 +175,12 @@ export function Table({
     socket.emit('rebuy', { amount: rebuyAmount });
   }, [socket, rebuyAmount]);
 
+  // I'm Back（仮離席から復帰）
+  const handleImBack = useCallback(() => {
+    if (!socket) return;
+    socket.emit('im-back');
+  }, [socket]);
+
   // ローディング中
   if (!room) {
     return (
@@ -376,6 +382,30 @@ export function Table({
               disabled={rebuyAmount < (room.config.buyInMin || 0) || rebuyAmount > (room.config.buyInMax || 10000)}
             >
               Add Chips
+            </button>
+          </div>
+          <div className="rebuy-options">
+            <button className="action-btn fold small" onClick={handleLeaveRoom}>
+              Leave Table
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* I'm Back パネル - SIT_OUT状態（チップあり） */}
+      {isSeated && isSittingOut && yourStack > 0 && (
+        <div className="rebuy-panel">
+          <div className="rebuy-header">
+            <span className="rebuy-icon">💤</span>
+            <h3 className="rebuy-title">Sitting Out</h3>
+          </div>
+          <p className="rebuy-message">You are currently sitting out due to inactivity</p>
+          <div className="rebuy-controls">
+            <button
+              className="action-btn check"
+              onClick={handleImBack}
+            >
+              I'm Back
             </button>
           </div>
           <div className="rebuy-options">

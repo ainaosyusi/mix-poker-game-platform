@@ -54,9 +54,11 @@ interface PlayerTimer {
 }
 const activeTimers: Map<string, PlayerTimer> = new Map(); // playerId -> timer
 const playerTimeBanks: Map<string, number> = new Map(); // playerId -> chips
+const consecutiveTimeouts: Map<string, number> = new Map(); // playerId -> timeout count
 
 const MAX_TIMER_SECONDS = 30;
 const INITIAL_TIMEBANK_CHIPS = 5;
+const MAX_CONSECUTIVE_TIMEOUTS = 3; // 3回連続タイムアウトでSIT_OUT
 const HAND_END_DELAY_MS = 2000;
 const AUTO_START_DELAY_MS = 2000;
 const ACTION_TOKEN_TTL_MS = 35000;
@@ -160,11 +162,24 @@ function handleTimerTimeout(roomId: string, playerId: string, io: Server) {
 
   actionTokens.delete(playerId);
 
+  // 連続タイムアウトをカウント
+  const timeoutCount = (consecutiveTimeouts.get(playerId) || 0) + 1;
+  consecutiveTimeouts.set(playerId, timeoutCount);
+
+  console.log(`⏰ Timer timeout for ${player.name} - Count: ${timeoutCount}/${MAX_CONSECUTIVE_TIMEOUTS}`);
+
+  // 3回連続タイムアウトでSIT_OUTに設定
+  if (timeoutCount >= MAX_CONSECUTIVE_TIMEOUTS) {
+    console.log(`🚫 ${player.name} auto sit-out due to ${timeoutCount} consecutive timeouts`);
+    player.pendingSitOut = true;
+    // ハンド後にSIT_OUTになる（現在のハンドは最後まで処理する）
+  }
+
   // チェック可能ならチェック、そうでなければフォールド
   const validActions = engine.getValidActions(room, playerId);
   const actionType: ActionType = validActions.includes('CHECK') ? 'CHECK' : 'FOLD';
 
-  console.log(`⏰ Timer timeout for ${player.name} - Auto ${actionType}`);
+  console.log(`⏰ Auto ${actionType} for ${player.name}`);
 
   const result = engine.processAction(room, {
     playerId,
@@ -1429,6 +1444,62 @@ io.on('connection', (socket) => {
     }
   });
 
+  // I'm Back（仮離席から復帰）
+  socket.on('im-back', () => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) {
+        socket.emit('error', { message: 'You are not in any room' });
+        return;
+      }
+
+      const room = roomManager.getRoomById(roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Room not found' });
+        return;
+      }
+
+      const player = room.players.find(p => p?.socketId === socket.id);
+      if (!player) {
+        socket.emit('error', { message: 'You are not seated' });
+        return;
+      }
+
+      // SIT_OUT状態でない場合は何もしない
+      if (player.status !== 'SIT_OUT') {
+        console.log(`⚠️  ${player.name} tried to return but is not sitting out (status: ${player.status})`);
+        return;
+      }
+
+      // ゲーム中は次のハンドから参加（pendingJoin設定）
+      if (room.gameState.status !== 'WAITING') {
+        player.pendingJoin = true;
+        player.pendingSitOut = false;
+        console.log(`👋 ${player.name} will join next hand`);
+        socket.emit('im-back-success', { message: 'Will join next hand' });
+      } else {
+        // 待機中なら即座に復帰
+        player.status = 'ACTIVE';
+        player.pendingJoin = false;
+        player.pendingSitOut = false;
+        console.log(`👋 ${player.name} returned from sit-out`);
+        socket.emit('im-back-success', { message: 'Returned to active' });
+
+        // ゲーム開始チェック（復帰後に人数が揃った場合）
+        scheduleNextHand(roomId, io);
+      }
+
+      // 連続タイムアウトカウンターをリセット
+      consecutiveTimeouts.delete(socket.id);
+
+      // 部屋内の全員に更新を通知
+      broadcastRoomState(roomId, room, io);
+
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
   // ========== Phase 3-B: Game Engine Events ==========
 
   // タイムバンク使用
@@ -1495,6 +1566,9 @@ io.on('connection', (socket) => {
         return;
       }
       actionTokens.delete(socket.id);
+
+      // アクション成功時は連続タイムアウトカウンターをリセット
+      consecutiveTimeouts.delete(socket.id);
 
       // 全員に更新を送信（ショーダウン前に必ず送信してチップを表示）
       broadcastRoomState(roomId, room, io);
