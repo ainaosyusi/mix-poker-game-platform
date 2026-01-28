@@ -202,6 +202,8 @@ export interface ShowdownResult {
         hand: string[];
         handRank: string;
         amount: number;
+        qualifyingHoleCards?: string[];  // 役判定に使われたホールカード
+        qualifyingBoardCards?: string[]; // 役判定に使われたボードカード
     }[];
     allHands: {
         playerId: string;
@@ -217,6 +219,36 @@ export class ShowdownManager {
 
     constructor() {
         this.potManager = new PotManager();
+    }
+
+    /**
+     * 勝者の役を構成するカードを特定
+     * bestFiveから、ホールカードとボードカードを分離
+     */
+    private identifyQualifyingCards(
+        bestFive: Card[],
+        holeCards: Card[],
+        boardCards: Card[]
+    ): { qualifyingHoleCards: string[]; qualifyingBoardCards: string[] } {
+        const qualifyingHoleCards: string[] = [];
+        const qualifyingBoardCards: string[] = [];
+
+        for (const card of bestFive) {
+            const cardStr = `${card.rank}${card.suit}`;
+            // ホールカードに含まれるかチェック
+            const inHole = holeCards.some(h => h.rank === card.rank && h.suit === card.suit);
+            if (inHole) {
+                qualifyingHoleCards.push(cardStr);
+            } else {
+                // ボードカードに含まれるかチェック
+                const inBoard = boardCards.some(b => b.rank === card.rank && b.suit === card.suit);
+                if (inBoard) {
+                    qualifyingBoardCards.push(cardStr);
+                }
+            }
+        }
+
+        return { qualifyingHoleCards, qualifyingBoardCards };
     }
 
     /**
@@ -330,7 +362,7 @@ export class ShowdownManager {
         });
 
         // サイドポット対応のポット分配（勝者の決定）
-        const winners = this.distributeToWinnersWithSidePots(room, evaluations, compareHands);
+        const winners = this.distributeToWinnersWithSidePots(room, evaluations, compareHands, board);
         const winnerIds = new Set(winners.map(w => w.playerId));
 
         // 手札の表示/マック判定
@@ -780,7 +812,7 @@ export class ShowdownManager {
         allEvaluations: T[],
         compareFunc: (a: T, b: T) => number
     ): ShowdownResult['winners'] {
-        const winnersMap = new Map<string, { player: Player; handRank: string; amount: number }>();
+        const winnersMap = new Map<string, { player: Player; handRank: string; amount: number; bestFive?: Card[] }>();
 
         // メインポットの分配
         if (room.gameState.pot.main > 0 && allEvaluations.length > 0) {
@@ -837,7 +869,8 @@ export class ShowdownManager {
                     winnersMap.set(w.player.socketId, {
                         player: w.player,
                         handRank: w.handRank,
-                        amount
+                        amount,
+                        bestFive: w.bestFive
                     });
                 }
             });
@@ -861,9 +894,11 @@ export class ShowdownManager {
     private distributeToWinnersWithSidePots(
         room: Room,
         allEvaluations: { player: Player; bestFive: Card[]; handRank: string }[],
-        compareFunc: (a: Card[], b: Card[]) => number
+        compareFunc: (a: Card[], b: Card[]) => number,
+        board: string[]
     ): ShowdownResult['winners'] {
-        const winnersMap = new Map<string, { player: Player; handRank: string; amount: number }>();
+        const winnersMap = new Map<string, { player: Player; handRank: string; amount: number; bestFive: Card[] }>();
+        const boardCards = parseCards(board);
 
         // 全参加者のソケットID（メインポット資格者）
         const allPlayerIds = allEvaluations.map(e => e.player.socketId);
@@ -893,7 +928,8 @@ export class ShowdownManager {
                 winnersMap.set(w.player.socketId, {
                     player: w.player,
                     handRank: w.handRank,
-                    amount
+                    amount,
+                    bestFive: w.bestFive
                 });
             });
         }
@@ -936,7 +972,8 @@ export class ShowdownManager {
                     winnersMap.set(w.player.socketId, {
                         player: w.player,
                         handRank: w.handRank,
-                        amount
+                        amount,
+                        bestFive: w.bestFive
                     });
                 }
             });
@@ -944,13 +981,24 @@ export class ShowdownManager {
 
         room.gameState.pot = { main: 0, side: [] };
 
-        return Array.from(winnersMap.values()).map(w => ({
-            playerId: w.player.socketId,
-            playerName: w.player.name,
-            hand: [...w.player.hand!],  // 深いコピー
-            handRank: w.handRank,
-            amount: w.amount
-        }));
+        return Array.from(winnersMap.values()).map(w => {
+            const holeCards = parseCards(w.player.hand!);
+            const { qualifyingHoleCards, qualifyingBoardCards } = this.identifyQualifyingCards(
+                w.bestFive,
+                holeCards,
+                boardCards
+            );
+
+            return {
+                playerId: w.player.socketId,
+                playerName: w.player.name,
+                hand: [...w.player.hand!],  // 深いコピー
+                handRank: w.handRank,
+                amount: w.amount,
+                qualifyingHoleCards,
+                qualifyingBoardCards
+            };
+        });
     }
 
     /**

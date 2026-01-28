@@ -178,15 +178,23 @@ interface CommunityCardsProps {
   cards: string[];
   animate?: boolean;
   highlightIndices?: number[]; // ハイライトするカードのインデックス（ショーダウン用）
+  highlightCards?: string[];   // ハイライトするカード（役判定に使われたカード）
 }
 
 export const CommunityCards = memo(function CommunityCards({
   cards,
   animate = false,
   highlightIndices = [],
+  highlightCards = [],
 }: CommunityCardsProps) {
   // 前回のカード枚数を追跡
   const prevCountRef = useRef(0);
+
+  // highlightCardsをインデックスに変換
+  const highlightIndicesFromCards = highlightCards
+    .map(cardStr => cards.indexOf(cardStr))
+    .filter(idx => idx !== -1);
+  const allHighlightIndices = [...highlightIndices, ...highlightIndicesFromCards];
 
   // 新しく追加されたカードのインデックス
   const newCardsStartIndex = animate ? prevCountRef.current : cards.length;
@@ -212,7 +220,7 @@ export const CommunityCards = memo(function CommunityCards({
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
       {cards.map((card, index) => {
-        const isHighlighted = highlightIndices.includes(index);
+        const isHighlighted = allHighlightIndices.includes(index);
         const isNewCard = animate && index >= newCardsStartIndex;
         // 新しいカードのみアニメーション、フロップは順番に
         const animationDelay = isNewCard ? (index - newCardsStartIndex) * 0.12 : 0;
@@ -224,6 +232,7 @@ export const CommunityCards = memo(function CommunityCards({
               animation: isNewCard ? `cardDealIn 0.4s ease-out ${animationDelay}s both` : undefined,
               transform: isHighlighted ? 'translateY(-8px)' : undefined,
               transition: 'transform 0.3s ease',
+              boxShadow: isHighlighted ? '0 0 20px 4px rgba(34, 197, 94, 0.8)' : undefined,
             }}
           >
             <div

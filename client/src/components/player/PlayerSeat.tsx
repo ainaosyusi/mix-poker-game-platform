@@ -26,6 +26,7 @@ interface PlayerSeatProps {
   timerSeconds?: number;
   maxTimerSeconds?: number;
   handRank?: string; // 役名（自分のハンド用）
+  highlightCards?: string[]; // ハイライトするカード（役判定に使われたカード）
 }
 
 // チップ位置を座席に応じて計算（テーブル中央寄りに配置）
@@ -117,6 +118,7 @@ export const PlayerSeat = memo(function PlayerSeat({
   timerSeconds,
   maxTimerSeconds = 30,
   handRank,
+  highlightCards = [],
 }: PlayerSeatProps) {
   const isFolded = player?.status === 'FOLDED';
   const isAllIn = player?.status === 'ALL_IN';
@@ -293,7 +295,9 @@ export const PlayerSeat = memo(function PlayerSeat({
         >
           {displayCards ? (
             // 表向きのカード
-            displayCards.slice(0, isDrawGame ? 5 : 4).map((card, i) => (
+            displayCards.slice(0, isDrawGame ? 5 : 4).map((card, i) => {
+              const isHighlighted = highlightCards.includes(card);
+              return (
               <div
                 key={i}
                 style={{
@@ -302,10 +306,12 @@ export const PlayerSeat = memo(function PlayerSeat({
                     : `rotate(${(i - (displayCards.length - 1) / 2) * 5}deg)`,
                   zIndex: i,
                   animation: cardDealAnimate && isYou ? `cardDealIn 0.4s ease-out ${i * 0.1}s both` : undefined,
+                  filter: isHighlighted ? 'drop-shadow(0 0 12px rgba(34, 197, 94, 0.9))' : undefined,
                 }}
               >
                 <Card card={card} size="small" />
               </div>
+            )})
             ))
           ) : (
             // 伏せカード（他プレイヤー）

@@ -101,6 +101,8 @@ export interface ShowdownResult {
     hand: string[];
     handRank: string;
     amount: number;
+    qualifyingHoleCards?: string[];  // 役判定に使われたホールカード
+    qualifyingBoardCards?: string[]; // 役判定に使われたボードカード
   }[];
   allHands: {
     playerId: string;

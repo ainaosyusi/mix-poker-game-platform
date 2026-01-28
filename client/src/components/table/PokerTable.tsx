@@ -181,7 +181,11 @@ export const PokerTable = memo(function PokerTable({
 
         {/* コミュニティカード */}
         <div style={getCommunityCardsPosition()}>
-          <CommunityCards cards={gameState.board} animate={animateCards} />
+          <CommunityCards
+            cards={gameState.board}
+            animate={animateCards}
+            highlightCards={showdownResult?.winners[0]?.qualifyingBoardCards || []}
+          />
         </div>
 
         {/* プレイヤー席 */}
@@ -194,7 +198,8 @@ export const PokerTable = memo(function PokerTable({
 
           // ショーダウン時のハンド
           const showdownHand = showdownResult?.allHands?.find(h => h.playerId === player?.socketId);
-          const isWinner = showdownResult?.winners?.some(w => w.playerId === player?.socketId);
+          const winnerData = showdownResult?.winners?.find(w => w.playerId === player?.socketId);
+          const isWinner = !!winnerData;
           const seatStyle = getSeatStyle(index);
 
           // 自分の役名を計算
@@ -221,6 +226,7 @@ export const PokerTable = memo(function PokerTable({
               timerSeconds={isActive ? timerSeconds : undefined}
               maxTimerSeconds={maxTimerSeconds}
               handRank={handRank}
+              highlightCards={winnerData?.qualifyingHoleCards || []}
             />
           );
         })}
