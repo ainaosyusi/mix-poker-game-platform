@@ -252,14 +252,18 @@ function processPostAction(roomId: string, room: any, engine: GameEngine, io: Se
 
     room.gameState.status = 'WAITING' as any;
 
-    // ショーダウン後の遅延（1.5秒）
+    // 全員に最終状態を送信
+    broadcastRoomState(roomId, room, io);
+
+    // ショーダウン後の遅延（2.5秒）
     setTimeout(() => {
       if (cleanupPendingLeavers(roomId, io)) {
         return;
       }
       // 次のハンドを自動開始
       scheduleNextHand(roomId, io);
-    }, 1500);
+    }, 2500);
+    return;
   }
 
   // 全員に更新を送信
@@ -637,6 +641,9 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
   const DELAY = 1500; // 1.5秒
 
   console.log(`🎬 Starting all-in runout from ${runoutPhase}`);
+
+  // ランアウト開始前に状態を送信（チップをポットに集める）
+  broadcastRoomState(roomId, room, io);
 
   io.to(`room:${roomId}`).emit('runout-started', {
     runoutPhase,
@@ -1361,13 +1368,13 @@ io.on('connection', (socket) => {
       }
       actionTokens.delete(socket.id);
 
+      // 全員に更新を送信（ショーダウン前に必ず送信してチップを表示）
+      broadcastRoomState(roomId, room, io);
+
       // ショーダウンチェック
       if (maybeHandleShowdown(roomId, room, io)) {
         return;
       }
-
-      // 全員に更新を送信
-      broadcastRoomState(roomId, room, io);
 
       // 次のアクティブプレイヤーに行動を促す
       if (room.activePlayerIndex !== -1) {
