@@ -251,11 +251,15 @@ function processPostAction(roomId: string, room: any, engine: GameEngine, io: Se
     }
 
     room.gameState.status = 'WAITING' as any;
-    if (cleanupPendingLeavers(roomId, io)) {
-      return;
-    }
-    // 次のハンドを自動開始
-    scheduleNextHand(roomId, io);
+
+    // ショーダウン後の遅延（1.5秒）
+    setTimeout(() => {
+      if (cleanupPendingLeavers(roomId, io)) {
+        return;
+      }
+      // 次のハンドを自動開始
+      scheduleNextHand(roomId, io);
+    }, 1500);
   }
 
   // 全員に更新を送信
@@ -890,6 +894,9 @@ io.on('connection', (socket) => {
       // 部屋内の全員に更新を通知
       broadcastRoomState(roomId, room, io);
 
+      // ゲーム開始チェック（リバイ後に人数が揃った場合）
+      scheduleNextHand(roomId, io);
+
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
@@ -1127,14 +1134,16 @@ io.on('connection', (socket) => {
             room.gameState.runoutPhase = undefined;
             room.gameState.status = 'WAITING' as any;
 
-            if (cleanupPendingLeavers(roomId, io)) {
-              return;
-            }
-
             broadcastRoomState(roomId, room, io);
 
-            // 次のハンドを自動開始
-            scheduleNextHand(roomId, io);
+            // ショーダウン後の遅延（1.5秒）
+            setTimeout(() => {
+              if (cleanupPendingLeavers(roomId, io)) {
+                return;
+              }
+              // 次のハンドを自動開始
+              scheduleNextHand(roomId, io);
+            }, 1500);
           };
 
           // 非同期でランアウトを実行
@@ -1181,11 +1190,15 @@ io.on('connection', (socket) => {
           }
 
           room.gameState.status = 'WAITING' as any;
-          if (cleanupPendingLeavers(roomId, io)) {
-            return;
-          }
-          // 次のハンドを自動開始
-          scheduleNextHand(roomId, io);
+
+          // ショーダウン後の遅延（1.5秒）
+          setTimeout(() => {
+            if (cleanupPendingLeavers(roomId, io)) {
+              return;
+            }
+            // 次のハンドを自動開始
+            scheduleNextHand(roomId, io);
+          }, 1500);
         }
       }
 
@@ -1307,10 +1320,21 @@ io.on('connection', (socket) => {
       if (engine.checkDrawPhaseComplete(room)) {
         // ベッティングフェーズに移行
         console.log(`✅ All players completed draw - starting betting for ${room.gameState.status}`);
-      }
 
-      // 全員に更新を送信
-      broadcastRoomState(roomId, room, io);
+        // 全員に更新を送信
+        broadcastRoomState(roomId, room, io);
+
+        // アクティブプレイヤーに行動を促す
+        if (room.activePlayerIndex !== -1) {
+          const nextPlayer = room.players[room.activePlayerIndex];
+          if (nextPlayer) {
+            emitYourTurn(roomId, room, engine, io, nextPlayer);
+          }
+        }
+      } else {
+        // まだ全員完了していない場合のみ状態送信
+        broadcastRoomState(roomId, room, io);
+      }
 
     } catch (error: any) {
       socket.emit('error', { message: error.message });
