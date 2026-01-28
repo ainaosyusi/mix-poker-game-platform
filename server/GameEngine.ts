@@ -191,7 +191,7 @@ export class GameEngine {
         return { success: true };
     }
 
-    private applyAction(room: Room, player: RoomPlayer, action: PlayerAction): string | null {
+    private applyAction(room: Room, player: Player, action: PlayerAction): string | null {
         switch (action.type) {
             case 'FOLD':
                 return this.processFold(player);
@@ -209,19 +209,19 @@ export class GameEngine {
         }
     }
 
-    private processFold(player: RoomPlayer): string | null {
+    private processFold(player: Player): string | null {
         player.status = 'FOLDED';
         return null;
     }
 
-    private processCheck(room: Room, player: RoomPlayer): string | null {
+    private processCheck(room: Room, player: Player): string | null {
         if (player.bet < room.gameState.currentBet) {
             return 'Cannot check, must call or raise';
         }
         return null;
     }
 
-    private processCall(room: Room, player: RoomPlayer): string | null {
+    private processCall(room: Room, player: Player): string | null {
         const callAmount = Math.min(room.gameState.currentBet - player.bet, player.stack);
         player.stack -= callAmount;
         player.bet += callAmount;
@@ -233,7 +233,7 @@ export class GameEngine {
         return null;
     }
 
-    private processBetOrRaise(room: Room, player: RoomPlayer, action: PlayerAction): string | null {
+    private processBetOrRaise(room: Room, player: Player, action: PlayerAction): string | null {
         const betAmount = action.amount || 0;
         const variantConfigBet = getVariantConfig(room.gameState.gameVariant);
 
@@ -246,7 +246,7 @@ export class GameEngine {
         return this.processBetOrRaiseNoLimit(room, player, betAmount);
     }
 
-    private processBetOrRaiseFixed(room: Room, player: RoomPlayer, betAmount: number): string | null {
+    private processBetOrRaiseFixed(room: Room, player: Player, betAmount: number): string | null {
         const capLimit = this.getCapLimit(room);
         if (room.gameState.raisesThisRound >= capLimit) {
             return 'Betting is capped';
@@ -259,7 +259,7 @@ export class GameEngine {
         return null;
     }
 
-    private processBetOrRaisePotLimit(room: Room, player: RoomPlayer, betAmount: number): string | null {
+    private processBetOrRaisePotLimit(room: Room, player: Player, betAmount: number): string | null {
         const context = this.getBetContext(room, player, betAmount);
         if ('error' in context) return context.error;
 
@@ -272,7 +272,7 @@ export class GameEngine {
         return null;
     }
 
-    private processBetOrRaiseNoLimit(room: Room, player: RoomPlayer, betAmount: number): string | null {
+    private processBetOrRaiseNoLimit(room: Room, player: Player, betAmount: number): string | null {
         const context = this.getBetContext(room, player, betAmount);
         if ('error' in context) return context.error;
 
@@ -282,7 +282,7 @@ export class GameEngine {
 
     private getBetContext(
         room: Room,
-        player: RoomPlayer,
+        player: Player,
         betAmount: number
     ): { totalBet: number; isAllInBet: boolean } | { error: string } {
         if (!Number.isFinite(betAmount) || betAmount <= 0) {
@@ -305,7 +305,7 @@ export class GameEngine {
 
     private applyBetOrRaise(
         room: Room,
-        player: RoomPlayer,
+        player: Player,
         betAmount: number,
         totalBet: number,
         betStructure: 'fixed' | 'pot-limit' | 'no-limit'
@@ -334,7 +334,7 @@ export class GameEngine {
         }
     }
 
-    private processAllIn(room: Room, player: RoomPlayer): string | null {
+    private processAllIn(room: Room, player: Player): string | null {
         const allInAmount = player.stack;
         const newTotal = player.bet + allInAmount;
         const raiseSizeAllIn = newTotal - room.gameState.currentBet;
@@ -828,7 +828,7 @@ export class GameEngine {
     /**
      * 基本アクション (CHECK vs FOLD/CALL) を追加
      */
-    private addBaseActions(actions: ActionType[], player: RoomPlayer, currentBet: number): void {
+    private addBaseActions(actions: ActionType[], player: Player, currentBet: number): void {
         if (player.bet >= currentBet) {
             // ベットがない（または既にコール済み）→ チェック可能
             actions.push('CHECK');
@@ -844,7 +844,7 @@ export class GameEngine {
      */
     private canPlayerRaise(
         room: Room,
-        player: RoomPlayer,
+        player: Player,
         variantConfig: any,
         callAmount: number,
         otherActivePlayers: any[]
@@ -862,7 +862,7 @@ export class GameEngine {
     /**
      * ALL-IN が可能かを判定
      */
-    private canPlayerAllIn(player: RoomPlayer, variantConfig: any, callAmount: number): boolean {
+    private canPlayerAllIn(player: Player, variantConfig: any, callAmount: number): boolean {
         const wouldCallAllIn = callAmount >= player.stack;
         // No-Limitのみ、かつコールがALL-INにならない場合のみ表示
         return variantConfig.betStructure === 'no-limit' && !wouldCallAllIn && player.stack > 0;
@@ -993,11 +993,11 @@ export class GameEngine {
         const variantConfig = getVariantConfig(room.gameState.gameVariant);
 
         if (variantConfig.communityCardType === 'stud') {
-            return this.getFixedBetSizeStud(phase, smallBet, bigBet);
+            return this.getFixedBetSizeStud(phase as any, smallBet, bigBet);
         }
 
         if (variantConfig.hasDrawPhase) {
-            return this.getFixedBetSizeDraw(room, variantConfig, phase, smallBet, bigBet);
+            return this.getFixedBetSizeDraw(room, variantConfig, phase as any, smallBet, bigBet);
         }
 
         return this.getFixedBetSizeFlop(room, smallBet, bigBet);
@@ -1021,7 +1021,7 @@ export class GameEngine {
         const drawRounds = variantConfig.drawRounds || 3;
         // Phase-based判定（防御的）: statusを直接チェック
         // Triple Draw: PREDRAW, FIRST_DRAW = Small Bet, SECOND_DRAW, THIRD_DRAW = Big Bet
-        if (phase === 'SECOND_DRAW' || phase === 'THIRD_DRAW' || phase === 'FOURTH_DRAW') {
+        if (phase === 'SECOND_DRAW' || phase === 'THIRD_DRAW') {
             return bigBet;
         }
         // Fallback: street-based判定

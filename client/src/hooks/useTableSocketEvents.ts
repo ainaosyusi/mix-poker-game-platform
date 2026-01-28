@@ -32,7 +32,7 @@ interface TableSocketOptions {
     betStructure: 'no-limit' | 'pot-limit' | 'fixed';
     isCapped: boolean;
     raisesRemaining: number;
-    fixedBetSize?: number;
+    fixedBetSize: number | undefined;
   }) => void;
   setActionToken: (token: string | null) => void;
   setTimerSeconds: Dispatch<SetStateAction<number | undefined>>;

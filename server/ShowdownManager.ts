@@ -812,7 +812,7 @@ export class ShowdownManager {
         allEvaluations: T[],
         compareFunc: (a: T, b: T) => number
     ): ShowdownResult['winners'] {
-        const winnersMap = new Map<string, { player: Player; handRank: string; amount: number; bestFive?: Card[] }>();
+        const winnersMap = new Map<string, { player: Player; handRank: string; amount: number }>();
 
         // メインポットの分配
         if (room.gameState.pot.main > 0 && allEvaluations.length > 0) {
@@ -869,8 +869,7 @@ export class ShowdownManager {
                     winnersMap.set(w.player.socketId, {
                         player: w.player,
                         handRank: w.handRank,
-                        amount,
-                        bestFive: w.bestFive
+                        amount
                     });
                 }
             });
