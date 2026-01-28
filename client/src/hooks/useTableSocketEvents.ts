@@ -134,7 +134,7 @@ export function useTableSocketEvents({
       addLog(createEventLog('info', `Added ${data.amount} chips (total: ${data.newStack})`));
     };
 
-    const handleImBackSuccess = (data: { message: string }) => {
+    const handleImBackSuccess = () => {
       addLog(createEventLog('info', "You're back in the game!"));
     };
 
