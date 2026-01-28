@@ -2444,3 +2444,289 @@ body {
 .winner-highlight {
   animation: winnerGlow 1.5s ease-in-out infinite;
 }
+
+/* ========================================
+   MOBILE OPTIMIZATIONS - スマホ最適化
+   ======================================== */
+
+/* タッチターゲットサイズの最適化（44px以上推奨） */
+@media (max-width: 768px) {
+  /* アクションボタン: タッチしやすいサイズに */
+  .action-btn {
+    min-height: 48px;
+    padding: 14px 24px;
+    font-size: 14px;
+    font-weight: 700;
+    /* タップ時のハイライトを防止 */
+    -webkit-tap-highlight-color: transparent;
+    /* タッチフィードバック */
+    touch-action: manipulation;
+  }
+
+  .action-btn:active {
+    transform: scale(0.95);
+    transition: transform 0.1s;
+  }
+
+  /* クイックベットボタン */
+  .quick-bet-btn {
+    min-height: 44px;
+    min-width: 70px;
+    padding: 12px 16px;
+    font-size: 13px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .quick-bet-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* レンジスライダー: タッチ操作しやすく */
+  .bet-slider {
+    height: 44px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .bet-slider::-webkit-slider-thumb {
+    width: 28px;
+    height: 28px;
+  }
+
+  .bet-slider::-moz-range-thumb {
+    width: 28px;
+    height: 28px;
+  }
+
+  /* テーブルヘッダーのボタン */
+  .header-btn,
+  .leave-btn,
+  .settings-btn {
+    min-height: 44px;
+    padding: 10px 20px;
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .header-btn:active,
+  .leave-btn:active,
+  .settings-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* タイムバンクボタン */
+  .timebank-btn {
+    min-height: 44px;
+    padding: 10px 20px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .timebank-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* カード交換ボタン（Draw用） */
+  .draw-btn,
+  .exchange-btn {
+    min-height: 48px;
+    padding: 12px 24px;
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .draw-btn:active,
+  .exchange-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* テーブル全体のパディング調整 */
+  .poker-table-container {
+    padding: 8px;
+    max-width: 100%;
+  }
+
+  /* アクションパネルの余白調整 */
+  .action-panel {
+    margin: 0 8px;
+    padding: 16px;
+    max-width: calc(100% - 16px);
+  }
+
+  /* ポット表示: 見やすく */
+  .pot-display {
+    padding: 10px 16px;
+    font-size: 16px;
+  }
+
+  .pot-amount {
+    font-size: 18px;
+  }
+
+  /* プレイヤーシート: タップ可能領域を広く */
+  .player-seat {
+    min-width: 80px;
+    min-height: 80px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* カード: タップ可能（Draw用） */
+  .playing-card {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .playing-card.selectable:active {
+    transform: translateY(-4px) scale(0.98);
+  }
+
+  /* 認証・メニュー画面のボタン */
+  .auth-btn,
+  .menu-btn,
+  .room-card {
+    min-height: 48px;
+    padding: 14px 24px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  .auth-btn:active,
+  .menu-btn:active,
+  .room-card:active {
+    transform: scale(0.98);
+  }
+
+  /* フォーム入力: タッチしやすく */
+  input[type="text"],
+  input[type="password"],
+  input[type="number"],
+  select {
+    min-height: 44px;
+    padding: 12px 16px;
+    font-size: 16px; /* iOS zoom 防止 */
+  }
+
+  /* テキストが小さすぎないように */
+  .player-name {
+    font-size: 11px;
+  }
+
+  .player-stack {
+    font-size: 11px;
+  }
+
+  .hand-rank {
+    font-size: 10px;
+  }
+}
+
+/* 極小画面（360px以下）の最適化 */
+@media (max-width: 360px) {
+  .action-btn {
+    min-width: 70px;
+    padding: 12px 16px;
+    font-size: 13px;
+  }
+
+  .quick-bet-btn {
+    min-width: 60px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
+  .action-panel {
+    padding: 12px;
+  }
+
+  .poker-table-container {
+    padding: 4px;
+  }
+}
+
+/* 横向き（ランドスケープ）モードの最適化 */
+@media (max-width: 900px) and (orientation: landscape) {
+  /* 縦スペースが限られるので高さを調整 */
+  .poker-table {
+    max-height: 70vh;
+  }
+
+  .poker-table-container {
+    padding: 8px;
+  }
+
+  .action-panel {
+    padding: 12px 16px;
+    max-width: 600px;
+  }
+
+  .action-btn {
+    padding: 10px 20px;
+    font-size: 13px;
+  }
+
+  .pot-display {
+    padding: 8px 12px;
+  }
+
+  .table-header {
+    padding: 8px 16px;
+  }
+
+  /* ゲームログを横向きでは非表示に（スペース節約） */
+  .game-log {
+    display: none;
+  }
+}
+
+/* タッチデバイス全般: ホバー効果を無効化 */
+@media (hover: none) and (pointer: coarse) {
+  .action-btn:hover,
+  .quick-bet-btn:hover,
+  .header-btn:hover,
+  .leave-btn:hover,
+  .room-card:hover {
+    /* ホバー効果を無効化 */
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* active状態のみ適用 */
+  .action-btn:active {
+    transform: scale(0.95);
+    opacity: 0.9;
+  }
+
+  .quick-bet-btn:active {
+    transform: scale(0.95);
+    opacity: 0.9;
+  }
+
+  .room-card:active {
+    transform: scale(0.98);
+    opacity: 0.95;
+  }
+}
+
+/* PWA対応: セーフエリア対応（ノッチ付きデバイス） */
+@supports (padding: max(0px)) {
+  .table-header {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+
+  .action-panel {
+    margin-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .auth-screen,
+  .main-menu,
+  .room-select {
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+}
