@@ -654,35 +654,45 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
 
   console.log(`🎬 Starting all-in runout from ${runoutPhase}`);
 
+  // ランアウト開始前にボードをクリアして、段階的に表示する
+  const fullBoard = [...board]; // 完全なボードを保存
+  room.gameState.board = []; // ボードをクリア
+
   // ランアウト開始前に状態を送信（チップをポットに集める）
   broadcastRoomState(roomId, room, io);
 
   io.to(`room:${roomId}`).emit('runout-started', {
     runoutPhase,
-    fullBoard: board
+    fullBoard: [] // 空配列を送信（段階的に表示するため）
   });
 
   const scheduleRunout = async () => {
     if (runoutPhase === 'PREFLOP') {
       await new Promise(r => setTimeout(r, DELAY));
-      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 3), phase: 'FLOP' });
+      room.gameState.board = fullBoard.slice(0, 3);
+      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 3), phase: 'FLOP' });
 
       await new Promise(r => setTimeout(r, DELAY));
-      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 4), phase: 'TURN' });
+      room.gameState.board = fullBoard.slice(0, 4);
+      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 4), phase: 'TURN' });
 
       await new Promise(r => setTimeout(r, DELAY));
-      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
+      room.gameState.board = fullBoard.slice(0, 5);
+      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
 
     } else if (runoutPhase === 'FLOP') {
       await new Promise(r => setTimeout(r, DELAY));
-      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 4), phase: 'TURN' });
+      room.gameState.board = fullBoard.slice(0, 4);
+      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 4), phase: 'TURN' });
 
       await new Promise(r => setTimeout(r, DELAY));
-      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
+      room.gameState.board = fullBoard.slice(0, 5);
+      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
 
     } else if (runoutPhase === 'TURN') {
       await new Promise(r => setTimeout(r, DELAY));
-      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
+      room.gameState.board = fullBoard.slice(0, 5);
+      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
     }
 
     await new Promise(r => setTimeout(r, DELAY));
