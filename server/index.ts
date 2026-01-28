@@ -731,14 +731,15 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
       // ショーダウン後、プレイヤーのstatusをリセット
       room.players.forEach((p) => {
         if (p) {
-          if (p.stack <= 0) {
-            // スタック0のプレイヤーは SIT_OUT
-            p.status = 'SIT_OUT';
-            console.log(`  💺 ${p.name} is now SIT_OUT (stack: 0)`);
-          } else if (p.status === 'ALL_IN') {
+          if (p.status === 'ALL_IN') {
             // オールインから生還したプレイヤーは ACTIVE に戻す
+            // stack=0の場合もACTIVEに戻す（リバイ可能にするため）
             p.status = 'ACTIVE';
-            console.log(`  ✅ ${p.name} returned to ACTIVE from ALL_IN (stack: ${p.stack})`);
+            if (p.stack <= 0) {
+              console.log(`  💰 ${p.name} needs rebuy (stack: 0)`);
+            } else {
+              console.log(`  ✅ ${p.name} returned to ACTIVE from ALL_IN (stack: ${p.stack})`);
+            }
           }
         }
       });
@@ -813,12 +814,15 @@ function handleNormalShowdown(roomId: string, room: any, io: Server) {
   // ショーダウン後、プレイヤーのstatusをリセット
   room.players.forEach((p) => {
     if (p) {
-      if (p.stack <= 0) {
-        p.status = 'SIT_OUT';
-        console.log(`  💺 ${p.name} is now SIT_OUT (stack: 0)`);
-      } else if (p.status === 'ALL_IN') {
+      if (p.status === 'ALL_IN') {
+        // オールインから生還したプレイヤーは ACTIVE に戻す
+        // stack=0の場合もACTIVEに戻す（リバイ可能にするため）
         p.status = 'ACTIVE';
-        console.log(`  ✅ ${p.name} returned to ACTIVE from ALL_IN (stack: ${p.stack})`);
+        if (p.stack <= 0) {
+          console.log(`  💰 ${p.name} needs rebuy (stack: 0)`);
+        } else {
+          console.log(`  ✅ ${p.name} returned to ACTIVE from ALL_IN (stack: ${p.stack})`);
+        }
       }
     }
   });

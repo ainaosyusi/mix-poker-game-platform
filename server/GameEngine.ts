@@ -57,17 +57,7 @@ export class GameEngine {
 
     private resetPlayersForNewHand(room: Room): void {
         for (const player of room.players) {
-            if (!player) continue;
-
-            // stack <= 0 のプレイヤーは自動的にSIT_OUTにする
-            if (player.stack <= 0) {
-                player.status = 'SIT_OUT';
-                player.hand = null;
-                player.bet = 0;
-                player.totalBet = 0;
-                if (player.studUpCards) player.studUpCards = [];
-                continue;
-            }
+            if (!player || player.stack <= 0) continue;
 
             if (player.pendingSitOut) {
                 player.status = 'SIT_OUT';
