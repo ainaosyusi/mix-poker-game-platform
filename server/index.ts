@@ -667,86 +667,111 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
   });
 
   const scheduleRunout = async () => {
-    if (runoutPhase === 'PREFLOP') {
-      await new Promise(r => setTimeout(r, DELAY));
-      room.gameState.board = fullBoard.slice(0, 3);
-      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 3), phase: 'FLOP' });
+    try {
+      if (runoutPhase === 'PREFLOP') {
+        await new Promise(r => setTimeout(r, DELAY));
+        room.gameState.board = fullBoard.slice(0, 3);
+        io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 3), phase: 'FLOP' });
+
+        await new Promise(r => setTimeout(r, DELAY));
+        room.gameState.board = fullBoard.slice(0, 4);
+        io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 4), phase: 'TURN' });
+
+        await new Promise(r => setTimeout(r, DELAY));
+        room.gameState.board = fullBoard.slice(0, 5);
+        io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
+
+      } else if (runoutPhase === 'FLOP') {
+        await new Promise(r => setTimeout(r, DELAY));
+        room.gameState.board = fullBoard.slice(0, 4);
+        io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 4), phase: 'TURN' });
+
+        await new Promise(r => setTimeout(r, DELAY));
+        room.gameState.board = fullBoard.slice(0, 5);
+        io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
+
+      } else if (runoutPhase === 'TURN') {
+        await new Promise(r => setTimeout(r, DELAY));
+        room.gameState.board = fullBoard.slice(0, 5);
+        io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
+      }
 
       await new Promise(r => setTimeout(r, DELAY));
-      room.gameState.board = fullBoard.slice(0, 4);
-      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 4), phase: 'TURN' });
 
-      await new Promise(r => setTimeout(r, DELAY));
-      room.gameState.board = fullBoard.slice(0, 5);
-      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
+      const calculatedPots = potManager.calculatePots(room.players);
+      room.gameState.pot = calculatedPots;
+      console.log(`💰 Pots calculated: Main=${calculatedPots.main}, Sides=${calculatedPots.side.map(s => s.amount).join(',')}`);
 
-    } else if (runoutPhase === 'FLOP') {
-      await new Promise(r => setTimeout(r, DELAY));
-      room.gameState.board = fullBoard.slice(0, 4);
-      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 4), phase: 'TURN' });
+      const showdownResult = showdownManager.executeShowdown(room);
+      io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
 
-      await new Promise(r => setTimeout(r, DELAY));
-      room.gameState.board = fullBoard.slice(0, 5);
-      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
-
-    } else if (runoutPhase === 'TURN') {
-      await new Promise(r => setTimeout(r, DELAY));
-      room.gameState.board = fullBoard.slice(0, 5);
-      io.to(`room:${roomId}`).emit('runout-board', { board: fullBoard.slice(0, 5), phase: 'RIVER' });
-    }
-
-    await new Promise(r => setTimeout(r, DELAY));
-
-    const calculatedPots = potManager.calculatePots(room.players);
-    room.gameState.pot = calculatedPots;
-    console.log(`💰 Pots calculated: Main=${calculatedPots.main}, Sides=${calculatedPots.side.map(s => s.amount).join(',')}`);
-
-    const showdownResult = showdownManager.executeShowdown(room);
-    io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
-
-    if (showdownResult.winners.length > 0) {
-      for (const winner of showdownResult.winners) {
-        const bonus = metaGameManager.checkSevenDeuce(room, winner.playerId, winner.hand);
-        if (bonus) {
-          io.to(`room:${roomId}`).emit('seven-deuce-bonus', bonus);
-          console.log(`🎲 7-2 BONUS: ${winner.playerName} wins ${bonus.amount}`);
+      if (showdownResult.winners.length > 0) {
+        for (const winner of showdownResult.winners) {
+          const bonus = metaGameManager.checkSevenDeuce(room, winner.playerId, winner.hand);
+          if (bonus) {
+            io.to(`room:${roomId}`).emit('seven-deuce-bonus', bonus);
+            console.log(`🎲 7-2 BONUS: ${winner.playerName} wins ${bonus.amount}`);
+          }
         }
       }
-    }
 
-    const rotation = rotationManager.checkRotation(room);
-    if (rotation.changed) {
-      console.log(`🔄 Next game: ${rotation.nextGame}`);
-      io.to(`room:${roomId}`).emit('next-game', {
-        nextGame: rotation.nextGame,
-        gamesList: room.rotation.gamesList
+      const rotation = rotationManager.checkRotation(room);
+      if (rotation.changed) {
+        console.log(`🔄 Next game: ${rotation.nextGame}`);
+        io.to(`room:${roomId}`).emit('next-game', {
+          nextGame: rotation.nextGame,
+          gamesList: room.rotation.gamesList
+        });
+      }
+
+      room.gameState.isRunout = false;
+      room.gameState.runoutPhase = undefined;
+      room.gameState.status = 'WAITING' as any;
+
+      // ショーダウン後、プレイヤーのstatusをリセット
+      room.players.forEach((p) => {
+        if (p) {
+          if (p.stack <= 0) {
+            // スタック0のプレイヤーは SIT_OUT
+            p.status = 'SIT_OUT';
+            console.log(`  💺 ${p.name} is now SIT_OUT (stack: 0)`);
+          } else if (p.status === 'ALL_IN') {
+            // オールインから生還したプレイヤーは ACTIVE に戻す
+            p.status = 'ACTIVE';
+            console.log(`  ✅ ${p.name} returned to ACTIVE from ALL_IN (stack: ${p.stack})`);
+          }
+        }
       });
+
+      console.log('🔄 After all-in showdown, player states:');
+      room.players.forEach((p, i) => {
+        if (p) {
+          console.log(`  [${i}] ${p.name}: stack=${p.stack}, status=${p.status}, pendingLeave=${p.pendingLeave}`);
+        }
+      });
+
+      broadcastRoomState(roomId, room, io);
+
+      setTimeout(() => {
+        console.log('⏱️  Attempting to schedule next hand after all-in...');
+        if (cleanupPendingLeavers(roomId, io)) {
+          console.log('⚠️  cleanupPendingLeavers returned true, stopping game');
+          return;
+        }
+        scheduleNextHand(roomId, io);
+      }, 2500);
+    } catch (error) {
+      console.error('❌ Error in scheduleRunout:', error);
+      // エラーが発生してもゲームを続行できるように
+      room.gameState.status = 'WAITING' as any;
+      broadcastRoomState(roomId, room, io);
+      setTimeout(() => scheduleNextHand(roomId, io), 2500);
     }
-
-    room.gameState.isRunout = false;
-    room.gameState.runoutPhase = undefined;
-    room.gameState.status = 'WAITING' as any;
-
-    console.log('🔄 After all-in showdown, player states:');
-    room.players.forEach((p, i) => {
-      if (p) {
-        console.log(`  [${i}] ${p.name}: stack=${p.stack}, status=${p.status}, pendingLeave=${p.pendingLeave}`);
-      }
-    });
-
-    broadcastRoomState(roomId, room, io);
-
-    setTimeout(() => {
-      console.log('⏱️  Attempting to schedule next hand after all-in...');
-      if (cleanupPendingLeavers(roomId, io)) {
-        console.log('⚠️  cleanupPendingLeavers returned true, stopping game');
-        return;
-      }
-      scheduleNextHand(roomId, io);
-    }, 2500);
   };
 
-  scheduleRunout();
+  scheduleRunout().catch((error) => {
+    console.error('❌ Unhandled error in scheduleRunout:', error);
+  });
 }
 
 function handleNormalShowdown(roomId: string, room: any, io: Server) {
@@ -785,7 +810,27 @@ function handleNormalShowdown(roomId: string, room: any, io: Server) {
     });
   }
 
+  // ショーダウン後、プレイヤーのstatusをリセット
+  room.players.forEach((p) => {
+    if (p) {
+      if (p.stack <= 0) {
+        p.status = 'SIT_OUT';
+        console.log(`  💺 ${p.name} is now SIT_OUT (stack: 0)`);
+      } else if (p.status === 'ALL_IN') {
+        p.status = 'ACTIVE';
+        console.log(`  ✅ ${p.name} returned to ACTIVE from ALL_IN (stack: ${p.stack})`);
+      }
+    }
+  });
+
   room.gameState.status = 'WAITING' as any;
+
+  console.log('🔄 After normal showdown, player states:');
+  room.players.forEach((p, i) => {
+    if (p) {
+      console.log(`  [${i}] ${p.name}: stack=${p.stack}, status=${p.status}, pendingLeave=${p.pendingLeave}`);
+    }
+  });
 
   setTimeout(() => {
     if (cleanupPendingLeavers(roomId, io)) {
