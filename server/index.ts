@@ -259,7 +259,7 @@ function processPostAction(roomId: string, room: any, engine: GameEngine, io: Se
   }
 
   // 全員に更新を送信
-  io.to(`room:${roomId}`).emit('room-state-update', room);
+  broadcastRoomState(roomId, room, io);
 
   // 次のアクティブプレイヤーに行動を促す
   if (room.activePlayerIndex !== -1) {
@@ -373,6 +373,21 @@ function sanitizeRoomForViewer(room: any, viewerSocketId?: string): any {
   };
 }
 
+function broadcastRoomState(roomId: string, room: any, io: Server) {
+  void io.in(`room:${roomId}`).fetchSockets()
+    .then(sockets => {
+      for (const sock of sockets) {
+        sock.emit('room-state-update', sanitizeRoomForViewer(room, sock.id));
+      }
+    })
+    .catch(error => {
+      console.error('❌ Failed to broadcast room-state-update', {
+        roomId,
+        error: error instanceof Error ? error.message : error
+      });
+    });
+}
+
 // ヘルパー関数: socketからroomIdを取得
 function getRoomIdFromSocket(socket: any): string | null {
   const rooms = Array.from(socket.rooms) as string[];
@@ -440,7 +455,7 @@ function handleRoomExit(
       socket.leave(`room:${roomId}`);
     }
     if (!actionProcessed) {
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
       io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
     }
     return;
@@ -453,7 +468,7 @@ function handleRoomExit(
 
   const roomStillExists = roomManager.getRoomById(roomId);
   if (roomStillExists) {
-    io.to(`room:${roomId}`).emit('room-state-update', roomStillExists);
+    broadcastRoomState(roomId, roomStillExists, io);
   } else {
     gameEngines.delete(roomId);
     roomActionInFlight.delete(roomId);
@@ -592,6 +607,7 @@ io.on('connection', (socket) => {
           }
 
           socket.join(`room:${data.roomId}`);
+          (socket.data as any).roomId = data.roomId;
           socket.emit('room-joined', {
             room: sanitizeRoomForViewer(room, socket.id),
             yourSocketId: socket.id,
@@ -599,7 +615,7 @@ io.on('connection', (socket) => {
           });
           logEvent('room_resumed', { roomId: data.roomId, playerName: existingPlayer.name });
           incrementMetric('room_resumed');
-          io.to(`room:${data.roomId}`).emit('room-state-update', room);
+          broadcastRoomState(data.roomId, room, io);
           return;
         }
       }
@@ -609,6 +625,8 @@ io.on('connection', (socket) => {
 
       // Socket.IOのルームに参加
       socket.join(`room:${data.roomId}`);
+      (socket.data as any).roomId = data.roomId;
+      (socket.data as any).roomId = data.roomId;
 
       socket.emit('room-joined', {
         room: sanitizeRoomForViewer(room, socket.id),
@@ -637,6 +655,9 @@ io.on('connection', (socket) => {
     if (!roomId) return;
     try {
       handleRoomExit(socket, roomId, io, { leaveRoom: true });
+      if ((socket.data as any).roomId === roomId) {
+        delete (socket.data as any).roomId;
+      }
     } catch (error) {
       // エラーは無視
     }
@@ -687,7 +708,7 @@ io.on('connection', (socket) => {
       socket.emit('sit-down-success', { seatIndex: data.seatIndex });
 
       // 部屋内の全員に更新を通知
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
 
       // ロビーに部屋リスト更新を通知
       io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
@@ -766,6 +787,7 @@ io.on('connection', (socket) => {
 
       // Socket.IOのルームに参加
       socket.join(`room:${data.roomId}`);
+      (socket.data as any).roomId = data.roomId;
       // ロビーから離脱
       socket.leave('lobby');
 
@@ -803,7 +825,7 @@ io.on('connection', (socket) => {
       socket.emit('sit-down-success', { seatIndex });
 
       // 部屋内の全員に更新を通知
-      io.to(`room:${data.roomId}`).emit('room-state-update', room);
+      broadcastRoomState(data.roomId, room, io);
 
       // ロビーに部屋リスト更新を通知
       io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
@@ -866,7 +888,7 @@ io.on('connection', (socket) => {
       socket.emit('rebuy-success', { amount: data.amount, newStack });
 
       // 部屋内の全員に更新を通知
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
 
     } catch (error: any) {
       socket.emit('error', { message: error.message });
@@ -1109,7 +1131,7 @@ io.on('connection', (socket) => {
               return;
             }
 
-            io.to(`room:${roomId}`).emit('room-state-update', room);
+            broadcastRoomState(roomId, room, io);
 
             // 次のハンドを自動開始
             scheduleNextHand(roomId, io);
@@ -1168,7 +1190,7 @@ io.on('connection', (socket) => {
       }
 
       // 全員に更新を送信
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
 
       // 次のアクティブプレイヤーに行動を促す
       if (room.activePlayerIndex !== -1) {
@@ -1288,7 +1310,7 @@ io.on('connection', (socket) => {
       }
 
       // 全員に更新を送信
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
 
     } catch (error: any) {
       socket.emit('error', { message: error.message });
@@ -1361,7 +1383,7 @@ io.on('connection', (socket) => {
       console.log(`⚙️ Room ${roomId} config updated: SB=${room.config.smallBlind}, BB=${room.config.bigBlind}, Ante=${room.config.studAnte}`);
 
       // 全員に更新を通知
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
       io.to(`room:${roomId}`).emit('config-updated', { config: room.config });
 
     } catch (error: any) {
@@ -1407,7 +1429,7 @@ io.on('connection', (socket) => {
       }
 
       // 全員に更新を通知
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
       io.to(`room:${roomId}`).emit('meta-game-updated', { metaGame: room.metaGame });
 
     } catch (error: any) {
@@ -1453,7 +1475,7 @@ io.on('connection', (socket) => {
       console.log(`🔄 Room ${roomId}: Rotation ${data.enabled ? 'enabled' : 'disabled'} [${gamesStr}]`);
 
       // 全員に更新を通知
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
       io.to(`room:${roomId}`).emit('rotation-updated', { rotation: room.rotation });
 
     } catch (error: any) {
@@ -1489,7 +1511,7 @@ io.on('connection', (socket) => {
     room.gameState.gameVariant = variant;
     console.log(`🎮 Room ${roomId}: Game variant changed to ${variant}`);
 
-    io.to(`room:${roomId}`).emit('room-state-update', room);
+    broadcastRoomState(roomId, room, io);
     io.to(`room:${roomId}`).emit('game-variant-changed', { variant });
   };
 
@@ -1547,7 +1569,7 @@ io.on('connection', (socket) => {
         nextGame,
         gamesList: room.rotation.gamesList
       });
-      io.to(`room:${roomId}`).emit('room-state-update', room);
+      broadcastRoomState(roomId, room, io);
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
@@ -1562,6 +1584,9 @@ io.on('connection', (socket) => {
         return;
       }
       handleRoomExit(socket, roomId, io, { leaveRoom: false });
+      if ((socket.data as any).roomId === roomId) {
+        delete (socket.data as any).roomId;
+      }
 
     } catch (error: any) {
       socket.emit('error', { message: error.message });
@@ -1570,19 +1595,20 @@ io.on('connection', (socket) => {
 
   // 切断した時
   socket.on('disconnect', () => {
-    console.log('👋 Player disconnected:', socket.id);
+    const roomId = (socket.data as any).roomId || getRoomIdFromSocket(socket);
+    if (!roomId) {
+      console.log('👋 Player disconnected (not in any room):', socket.id);
+      return;
+    }
+    console.log(`👋 Player disconnected: ${socket.id} from room ${roomId}`);
     logEvent('disconnect', { playerId: socket.id });
     incrementMetric('disconnect');
 
-    // すべての部屋から退出（handleRoomExitがauto-fold + pendingLeave処理を行う）
-    const roomIds = Array.from(socket.rooms).filter(r => r.startsWith('room:')).map(r => r.slice(5));
-
-    for (const roomId of roomIds) {
-      try {
-        handleRoomExit(socket, roomId, io);
-      } catch (error) {
-        // エラーは無視（すでに離席済みの可能性）
-      }
+    try {
+      handleRoomExit(socket, roomId, io);
+      delete (socket.data as any).roomId;
+    } catch (error) {
+      // エラーは無視（すでに離席済みの可能性）
     }
 
     io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
