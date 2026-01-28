@@ -90,6 +90,9 @@ function App() {
 
   // ルーム離脱 → メインメニューに戻る
   const handleLeaveRoom = useCallback(() => {
+    if (socketRef.current) {
+      socketRef.current.emit('leave-room');
+    }
     setCurrentRoomId(null);
     setInitialRoomData(null);
     setInitialHand(null);

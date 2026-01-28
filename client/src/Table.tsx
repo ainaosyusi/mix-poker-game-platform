@@ -216,6 +216,10 @@ export function Table({
     });
 
     return () => {
+      // コンポーネントアンマウント時にルームから退出
+      socket.emit('leave-room');
+
+      // イベントリスナーをクリーンアップ
       socket.off('room-state-update');
       socket.off('room-joined');
       socket.off('game-started');
