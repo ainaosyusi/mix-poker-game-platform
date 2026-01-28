@@ -8,10 +8,10 @@ nixPkgs = ["nodejs_20"]
 cmds = ["npm install --prefix client", "npm install --prefix server"]
 
 [build.nixpacksPlan.phases.build]
-cmds = ["npm run build --prefix client", "cd server && npx prisma generate && npx prisma migrate deploy && npm run build"]
+cmds = ["npm run build --prefix client", "cd server && npx prisma generate && npm run build"]
 
 [deploy]
-startCommand = "cd server && npm run start"
+startCommand = "cd server && npx prisma migrate deploy && npm run start"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
