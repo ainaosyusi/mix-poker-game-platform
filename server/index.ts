@@ -304,16 +304,25 @@ function scheduleNextHand(roomId: string, io: Server) {
     p !== null && p.stack > 0 && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
   );
 
-  console.log(`🎲 scheduleNextHand: ${activePlayers.length} active players found`);
+  console.log(`🎲 scheduleNextHand called for room ${roomId}`);
+  console.log(`   Status: ${room.gameState.status}`);
+  console.log(`   Active players found: ${activePlayers.length}`);
+  console.log(`   Player details:`);
+  room.players.forEach((p, i) => {
+    if (p) {
+      console.log(`     [${i}] ${p.name}: stack=${p.stack}, status=${p.status}, flags={join:${p.pendingJoin}, sitOut:${p.pendingSitOut}, leave:${p.pendingLeave}}`);
+    } else {
+      console.log(`     [${i}] (empty seat)`);
+    }
+  });
+
   if (activePlayers.length < 2) {
-    console.log('⚠️  scheduleNextHand: not enough players (< 2)');
-    room.players.forEach((p, i) => {
-      if (p) {
-        console.log(`  [${i}] ${p.name}: stack=${p.stack}, status=${p.status}, flags={pendingJoin:${p.pendingJoin}, pendingSitOut:${p.pendingSitOut}, pendingLeave:${p.pendingLeave}}`);
-      }
-    });
+    console.log('⚠️  scheduleNextHand: NOT ENOUGH PLAYERS (< 2) - game cannot start');
+    console.log('   → Waiting for more players or rebuy...');
     return;
   }
+
+  console.log(`✅ scheduleNextHand: ${activePlayers.length} players ready, scheduling game start in 2 seconds...`);
 
   const timeout = setTimeout(() => {
     pendingStarts.delete(roomId);
@@ -335,8 +344,13 @@ function scheduleNextHand(roomId: string, io: Server) {
     }
 
     // ハンドを開始
+    console.log(`🚀 Starting new hand for room ${roomId}...`);
     const success = engine.startHand(currentRoom);
-    if (!success) return;
+    if (!success) {
+      console.log(`❌ Failed to start hand for room ${roomId}`);
+      return;
+    }
+    console.log(`✅ Hand started successfully for room ${roomId}`);
 
     // 全員にゲーム状態と自分のハンドを送信
     for (const player of currentRoom.players) {
@@ -654,6 +668,18 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
 
   console.log(`🎬 Starting all-in runout from ${runoutPhase}`);
 
+  // オールインプレイヤーのハンドを収集
+  const allInPlayers = room.players.filter(p =>
+    p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN') && p.hand && p.hand.length > 0
+  );
+  const revealedHands = allInPlayers.map(p => ({
+    playerId: p!.socketId,
+    playerName: p!.name,
+    hand: p!.hand
+  }));
+
+  console.log(`🃏 Revealing hands for ${revealedHands.length} players:`, revealedHands.map(r => `${r.playerName}: ${r.hand.join(',')}`).join(' | '));
+
   // ランアウト開始前にボードをクリアして、段階的に表示する
   const fullBoard = [...board]; // 完全なボードを保存
   room.gameState.board = []; // ボードをクリア
@@ -661,9 +687,11 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
   // ランアウト開始前に状態を送信（チップをポットに集める）
   broadcastRoomState(roomId, room, io);
 
+  // ハンド開示を送信
   io.to(`room:${roomId}`).emit('runout-started', {
     runoutPhase,
-    fullBoard: [] // 空配列を送信（段階的に表示するため）
+    fullBoard: [], // 空配列を送信（段階的に表示するため）
+    revealedHands  // 全プレイヤーのハンドを開示
   });
 
   const scheduleRunout = async () => {
@@ -702,7 +730,20 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
       room.gameState.pot = calculatedPots;
       console.log(`💰 Pots calculated: Main=${calculatedPots.main}, Sides=${calculatedPots.side.map(s => s.amount).join(',')}`);
 
+      console.log('🎯 Executing showdown...');
+      console.log(`   Pot before showdown: Main=${room.gameState.pot.main}, Sides=${room.gameState.pot.side.map((s: any) => s.amount).join(',')}`);
+
       const showdownResult = showdownManager.executeShowdown(room);
+
+      console.log(`🏆 Showdown complete. Winners: ${showdownResult.winners.map(w => w.playerName).join(', ')}`);
+      if (showdownResult.chipDistribution && showdownResult.chipDistribution.length > 0) {
+        console.log(`💰 Chip distribution:`);
+        showdownResult.chipDistribution.forEach((dist: any) => {
+          const player = room.players.find((p: any) => p?.socketId === dist.playerId);
+          console.log(`   ${player?.name || dist.playerId}: +${dist.amount} (new stack: ${player?.stack || '?'})`);
+        });
+      }
+
       io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
 
       if (showdownResult.winners.length > 0) {
@@ -1367,6 +1408,12 @@ io.on('connection', (socket) => {
       player.stack = newStack;
       console.log(`💰 ${player.name} rebought for ${data.amount} (new stack: ${newStack})`);
 
+      // ステータスをACTIVEに戻す（SIT_OUTやその他の状態から復帰）
+      if (player.status !== 'ACTIVE') {
+        console.log(`   → Changing ${player.name} status from ${player.status} to ACTIVE`);
+        player.status = 'ACTIVE';
+      }
+
       // リバイ成功を通知
       socket.emit('rebuy-success', { amount: data.amount, newStack });
 
@@ -1374,6 +1421,7 @@ io.on('connection', (socket) => {
       broadcastRoomState(roomId, room, io);
 
       // ゲーム開始チェック（リバイ後に人数が揃った場合）
+      console.log(`💰 After rebuy, checking if game can start...`);
       scheduleNextHand(roomId, io);
 
     } catch (error: any) {

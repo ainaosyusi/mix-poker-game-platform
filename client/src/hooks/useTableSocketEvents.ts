@@ -144,8 +144,19 @@ export function useTableSocketEvents({
       addLog(createEventLog('info', `${data.playerName} drew ${data.cardCount} cards`));
     };
 
-    const handleRunoutStarted = (_data: { runoutPhase: string; fullBoard: string[] }) => {
+    const handleRunoutStarted = (data: {
+      runoutPhase: string;
+      fullBoard: string[];
+      revealedHands?: Array<{ playerId: string; playerName: string; hand: string[] }>
+    }) => {
       addLog(createEventLog('info', 'All-in runout...'));
+
+      // ハンド開示をログに追加
+      if (data.revealedHands && data.revealedHands.length > 0) {
+        data.revealedHands.forEach(reveal => {
+          addLog(createEventLog('info', `${reveal.playerName} shows: ${reveal.hand.join(' ')}`));
+        });
+      }
     };
 
     const handleRunoutBoard = (data: { board: string[]; phase: string }) => {
