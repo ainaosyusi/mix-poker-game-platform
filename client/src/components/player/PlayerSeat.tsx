@@ -311,7 +311,8 @@ export const PlayerSeat = memo(function PlayerSeat({
               >
                 <Card card={card} size="small" />
               </div>
-            )})
+            );
+            })
           ) : (
             // 伏せカード（他プレイヤー）
             [...Array(isDrawGame ? 5 : 2)].map((_, i) => (
