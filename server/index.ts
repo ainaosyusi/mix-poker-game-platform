@@ -1,3 +1,7 @@
+/**
+ * Mix Poker Server - Main Entry Point
+ * Handles Socket.IO connections, game logic, and room management
+ */
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { createServer } from 'http';
