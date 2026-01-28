@@ -38,7 +38,24 @@ export class GameEngine {
         // ハンド番号を増加
         room.gameState.handNumber = (room.gameState.handNumber || 0) + 1;
 
-        // プレイヤーの状態をリセット
+        this.resetPlayersForNewHand(room);
+        this.resetHandState(room);
+        this.deck = this.dealer.createDeck();
+
+        const variantConfig = getVariantConfig(room.gameState.gameVariant);
+        const { bbIndex } = this.setupButtonAndBlinds(room, variantConfig);
+        const { bringInIndex } = this.initializeVariantHand(room, variantConfig);
+        this.setInitialActivePlayer(room, variantConfig, bbIndex, bringInIndex);
+
+        // このストリートの開始プレイヤーを記録
+        room.streetStarterIndex = room.activePlayerIndex;
+
+        console.log(`✅ Hand started. Active player: seat ${room.activePlayerIndex}`);
+
+        return true;
+    }
+
+    private resetPlayersForNewHand(room: Room): void {
         for (const player of room.players) {
             if (!player || player.stack <= 0) continue;
 
@@ -63,90 +80,85 @@ export class GameEngine {
             player.totalBet = 0;
             if (player.studUpCards) player.studUpCards = [];
         }
+    }
 
-        // ポットをリセット
+    private resetHandState(room: Room): void {
         room.gameState.pot = { main: 0, side: [] };
         room.gameState.board = [];
         room.gameState.currentBet = 0;
         room.gameState.minRaise = room.config.bigBlind;
-        room.gameState.raisesThisRound = 0; // レイズカウンタリセット
-
-        // 最後のアグレッサーをリセット
+        room.gameState.raisesThisRound = 0;
         room.lastAggressorIndex = -1;
+    }
 
-        // デッキを作成
-        this.deck = this.dealer.createDeck();
-
-        // ゲームバリアント取得
-        const variantConfig = getVariantConfig(room.gameState.gameVariant);
-
-        // ボタンを移動（ボタンありゲームのみ）
-        if (variantConfig.hasButton) {
-            this.dealer.moveButton(room);
+    private setupButtonAndBlinds(room: Room, variantConfig: any): { sbIndex: number; bbIndex: number } {
+        if (!variantConfig.hasButton) {
+            return { sbIndex: -1, bbIndex: -1 };
         }
 
-        // ブラインド徴収（ボタンありゲームのみ、Studはアンティ）
-        let sbIndex = -1;
-        let bbIndex = -1;
-        if (variantConfig.hasButton) {
-            const blinds = this.dealer.collectBlinds(room);
-            sbIndex = blinds.sbIndex;
-            bbIndex = blinds.bbIndex;
-            room.gameState.currentBet = room.config.bigBlind;
-        }
+        this.dealer.moveButton(room);
+        const blinds = this.dealer.collectBlinds(room);
+        room.gameState.currentBet = room.config.bigBlind;
+        return { sbIndex: blinds.sbIndex, bbIndex: blinds.bbIndex };
+    }
 
-        // バリアントに応じたカード配布
-        let bringInIndex = -1;
+    private initializeVariantHand(room: Room, variantConfig: any): { bringInIndex: number } {
         if (variantConfig.communityCardType === 'stud') {
-            // Stud: 3rd Street (2 down + 1 up)
-            this.dealer.dealStudInitial(this.deck, room.players);
-            room.gameState.status = 'THIRD_STREET' as any;
-            room.gameState.street = 0;
+            return this.initializeStudHand(room);
+        }
+        if (variantConfig.hasDrawPhase) {
+            this.initializeDrawHand(room, variantConfig);
+            return { bringInIndex: -1 };
+        }
+        this.initializeFlopHand(room, variantConfig);
+        return { bringInIndex: -1 };
+    }
 
-            // Bring-In判定（Razzは最も強いカードがBring-In）
-            const isRazz = room.gameState.gameVariant === 'RAZZ';
-            bringInIndex = this.dealer.determineBringIn(room.players, isRazz);
+    private initializeStudHand(room: Room): { bringInIndex: number } {
+        this.dealer.dealStudInitial(this.deck, room.players);
+        room.gameState.status = 'THIRD_STREET' as any;
+        room.gameState.street = 0;
 
-            if (bringInIndex !== -1) {
-                // Bring-In額: 設定値があればそれを使用、なければBB/5をデフォルト
-                const bringInAmount = room.config.studAnte ?? Math.max(1, Math.floor(room.config.bigBlind / 5));
-                this.dealer.collectBringIn(room, bringInIndex, bringInAmount);
-                // Complete額 = Small Bet (BB額)
-                // 3rd-4th Street: Small Bet = BB
-                // 5th+ Street: Big Bet = 2*BB (getFixedBetSizeで処理)
-                room.gameState.minRaise = room.config.bigBlind;
-                room.gameState.currentBet = bringInAmount;
-            }
-        } else if (variantConfig.hasDrawPhase) {
-            // Draw: 5枚配布（Badugiは4枚）
-            this.dealer.dealHoleCards(this.deck, room.players, variantConfig.holeCardCount);
-            room.gameState.status = 'PREDRAW' as any;
-            room.gameState.street = 0;
-        } else {
-            // Flop games (NLH, PLO): ホールカード配布
-            this.dealer.dealHoleCards(this.deck, room.players, variantConfig.holeCardCount);
-            room.gameState.status = 'PREFLOP' as any;
-            room.gameState.street = 0;
+        const isRazz = room.gameState.gameVariant === 'RAZZ';
+        const bringInIndex = this.dealer.determineBringIn(room.players, isRazz);
+
+        if (bringInIndex !== -1) {
+            const bringInAmount = room.config.studAnte ?? Math.max(1, Math.floor(room.config.bigBlind / 5));
+            this.dealer.collectBringIn(room, bringInIndex, bringInAmount);
+            room.gameState.minRaise = room.config.bigBlind;
+            room.gameState.currentBet = bringInAmount;
         }
 
-        // アクティブプレイヤーを設定
+        return { bringInIndex };
+    }
+
+    private initializeDrawHand(room: Room, variantConfig: any): void {
+        this.dealer.dealHoleCards(this.deck, room.players, variantConfig.holeCardCount);
+        room.gameState.status = 'PREDRAW' as any;
+        room.gameState.street = 0;
+    }
+
+    private initializeFlopHand(room: Room, variantConfig: any): void {
+        this.dealer.dealHoleCards(this.deck, room.players, variantConfig.holeCardCount);
+        room.gameState.status = 'PREFLOP' as any;
+        room.gameState.street = 0;
+    }
+
+    private setInitialActivePlayer(
+        room: Room,
+        variantConfig: any,
+        bbIndex: number,
+        bringInIndex: number
+    ): void {
         if (variantConfig.hasButton && bbIndex !== -1) {
-            // ボタンありゲーム: BBの次から
             room.activePlayerIndex = this.dealer.getNextActivePlayer(room, bbIndex);
-        } else if (bringInIndex !== -1) {
-            // Stud: Bring-Inの次から（時計回り）
-            room.activePlayerIndex = this.dealer.getNextActivePlayer(room, bringInIndex);
-        } else {
-            // フォールバック: 座席0から
-            room.activePlayerIndex = this.dealer.getNextActivePlayer(room, -1);
+            return;
         }
-
-        // このストリートの開始プレイヤーを記録
-        room.streetStarterIndex = room.activePlayerIndex;
-
-        console.log(`✅ Hand started. Active player: seat ${room.activePlayerIndex}`);
-
-        return true;
+        if (bringInIndex !== -1) {
+            room.activePlayerIndex = this.dealer.getNextActivePlayer(room, bringInIndex);
+            return;
+        }
+        room.activePlayerIndex = this.dealer.getNextActivePlayer(room, -1);
     }
 
     /**
@@ -168,120 +180,9 @@ export class GameEngine {
 
         console.log(`🎯 ${player.name} -> ${action.type}${action.amount ? ` ${action.amount}` : ''}`);
 
-        switch (action.type) {
-            case 'FOLD':
-                player.status = 'FOLDED';
-                break;
-
-            case 'CHECK':
-                if (player.bet < room.gameState.currentBet) {
-                    return { success: false, error: 'Cannot check, must call or raise' };
-                }
-                break;
-
-            case 'CALL':
-                const callAmount = Math.min(room.gameState.currentBet - player.bet, player.stack);
-                player.stack -= callAmount;
-                player.bet += callAmount;
-                player.totalBet += callAmount;
-                room.gameState.pot.main += callAmount;
-                if (player.stack === 0) {
-                    player.status = 'ALL_IN';
-                }
-                break;
-
-            case 'BET':
-            case 'RAISE':
-                const betAmount = action.amount || 0;
-                if (!Number.isFinite(betAmount) || betAmount <= 0) {
-                    return { success: false, error: 'Invalid bet amount' };
-                }
-                const variantConfigBet = getVariantConfig(room.gameState.gameVariant);
-                const isAllInBet = betAmount >= player.stack;
-
-                // Fixed-Limit: キャップチェック（5-bet cap = 4 raises）
-                if (variantConfigBet.betStructure === 'fixed') {
-                    const capLimit = this.getCapLimit(room);
-                    if (room.gameState.raisesThisRound >= capLimit) {
-                        return { success: false, error: 'Betting is capped' };
-                    }
-                }
-
-                const minTotal = this.getMinBetTo(room, player);
-
-                const totalBet = player.bet + betAmount;
-
-                if (totalBet < minTotal && !isAllInBet) {
-                    return { success: false, error: `Minimum raise is ${minTotal}` };
-                }
-                if (betAmount > player.stack) {
-                    return { success: false, error: 'Not enough chips' };
-                }
-
-                // Pot-Limit: 最大ベット額チェック
-                if (variantConfigBet.betStructure === 'pot-limit') {
-                    const maxPotBet = this.calculatePotLimitMax(room, player);
-                    if (totalBet > maxPotBet) {
-                        return { success: false, error: `Maximum bet is ${maxPotBet} (pot limit)` };
-                    }
-                }
-
-                const raiseSize = totalBet - room.gameState.currentBet;
-                const reopensAction = raiseSize >= room.gameState.minRaise;
-
-                player.stack -= betAmount;
-                player.bet = totalBet;
-                player.totalBet += betAmount;
-                room.gameState.pot.main += betAmount;
-                room.gameState.currentBet = totalBet;
-
-                if (reopensAction) {
-                    room.gameState.minRaise = raiseSize;
-                    // アグレッシブアクション後、このプレイヤーがストリートを閉じる
-                    room.streetStarterIndex = room.activePlayerIndex;
-                    if (variantConfigBet.betStructure === 'fixed') {
-                        room.gameState.raisesThisRound++;
-                    }
-                } else if (variantConfigBet.betStructure !== 'fixed') {
-                    // NL/PLはキャップ管理しないためカウント不要
-                }
-
-                // 最後のアグレッサーを記録（ショーダウン順序用）
-                room.lastAggressorIndex = room.activePlayerIndex;
-
-                if (player.stack === 0) {
-                    player.status = 'ALL_IN';
-                }
-                break;
-
-            case 'ALL_IN':
-                const allInAmount = player.stack;
-                const newTotal = player.bet + allInAmount;
-                const raiseSizeAllIn = newTotal - room.gameState.currentBet;
-                const reopensAllIn = raiseSizeAllIn >= room.gameState.minRaise;
-
-                player.bet = newTotal;
-                player.totalBet += allInAmount;
-                player.stack = 0;
-                player.status = 'ALL_IN';
-                room.gameState.pot.main += allInAmount;
-
-                if (newTotal > room.gameState.currentBet) {
-                    room.gameState.currentBet = newTotal;
-                    if (reopensAllIn) {
-                        room.gameState.minRaise = raiseSizeAllIn;
-                        // レイズを含むALL_INの場合、このプレイヤーがストリートを閉じる
-                        room.streetStarterIndex = room.activePlayerIndex;
-                    }
-                    // 最後のアグレッサーを記録
-                    room.lastAggressorIndex = room.activePlayerIndex;
-                    if (getVariantConfig(room.gameState.gameVariant).betStructure === 'fixed' && reopensAllIn) {
-                        room.gameState.raisesThisRound++;
-                    } else if (getVariantConfig(room.gameState.gameVariant).betStructure !== 'fixed') {
-                        room.gameState.raisesThisRound++;
-                    }
-                }
-                break;
+        const actionError = this.applyAction(room, player, action);
+        if (actionError) {
+            return { success: false, error: actionError };
         }
 
         // 次のプレイヤーに移動
@@ -290,93 +191,193 @@ export class GameEngine {
         return { success: true };
     }
 
+    private applyAction(room: Room, player: RoomPlayer, action: PlayerAction): string | null {
+        switch (action.type) {
+            case 'FOLD':
+                return this.processFold(player);
+            case 'CHECK':
+                return this.processCheck(room, player);
+            case 'CALL':
+                return this.processCall(room, player);
+            case 'BET':
+            case 'RAISE':
+                return this.processBetOrRaise(room, player, action);
+            case 'ALL_IN':
+                return this.processAllIn(room, player);
+            default:
+                return 'Invalid action';
+        }
+    }
+
+    private processFold(player: RoomPlayer): string | null {
+        player.status = 'FOLDED';
+        return null;
+    }
+
+    private processCheck(room: Room, player: RoomPlayer): string | null {
+        if (player.bet < room.gameState.currentBet) {
+            return 'Cannot check, must call or raise';
+        }
+        return null;
+    }
+
+    private processCall(room: Room, player: RoomPlayer): string | null {
+        const callAmount = Math.min(room.gameState.currentBet - player.bet, player.stack);
+        player.stack -= callAmount;
+        player.bet += callAmount;
+        player.totalBet += callAmount;
+        room.gameState.pot.main += callAmount;
+        if (player.stack === 0) {
+            player.status = 'ALL_IN';
+        }
+        return null;
+    }
+
+    private processBetOrRaise(room: Room, player: RoomPlayer, action: PlayerAction): string | null {
+        const betAmount = action.amount || 0;
+        const variantConfigBet = getVariantConfig(room.gameState.gameVariant);
+
+        if (variantConfigBet.betStructure === 'fixed') {
+            return this.processBetOrRaiseFixed(room, player, betAmount);
+        }
+        if (variantConfigBet.betStructure === 'pot-limit') {
+            return this.processBetOrRaisePotLimit(room, player, betAmount);
+        }
+        return this.processBetOrRaiseNoLimit(room, player, betAmount);
+    }
+
+    private processBetOrRaiseFixed(room: Room, player: RoomPlayer, betAmount: number): string | null {
+        const capLimit = this.getCapLimit(room);
+        if (room.gameState.raisesThisRound >= capLimit) {
+            return 'Betting is capped';
+        }
+
+        const context = this.getBetContext(room, player, betAmount);
+        if ('error' in context) return context.error;
+
+        this.applyBetOrRaise(room, player, betAmount, context.totalBet, 'fixed');
+        return null;
+    }
+
+    private processBetOrRaisePotLimit(room: Room, player: RoomPlayer, betAmount: number): string | null {
+        const context = this.getBetContext(room, player, betAmount);
+        if ('error' in context) return context.error;
+
+        const maxPotBet = this.calculatePotLimitMax(room, player);
+        if (context.totalBet > maxPotBet) {
+            return `Maximum bet is ${maxPotBet} (pot limit)`;
+        }
+
+        this.applyBetOrRaise(room, player, betAmount, context.totalBet, 'pot-limit');
+        return null;
+    }
+
+    private processBetOrRaiseNoLimit(room: Room, player: RoomPlayer, betAmount: number): string | null {
+        const context = this.getBetContext(room, player, betAmount);
+        if ('error' in context) return context.error;
+
+        this.applyBetOrRaise(room, player, betAmount, context.totalBet, 'no-limit');
+        return null;
+    }
+
+    private getBetContext(
+        room: Room,
+        player: RoomPlayer,
+        betAmount: number
+    ): { totalBet: number; isAllInBet: boolean } | { error: string } {
+        if (!Number.isFinite(betAmount) || betAmount <= 0) {
+            return { error: 'Invalid bet amount' };
+        }
+
+        const isAllInBet = betAmount >= player.stack;
+        const minTotal = this.getMinBetTo(room, player);
+        const totalBet = player.bet + betAmount;
+
+        if (totalBet < minTotal && !isAllInBet) {
+            return { error: `Minimum raise is ${minTotal}` };
+        }
+        if (betAmount > player.stack) {
+            return { error: 'Not enough chips' };
+        }
+
+        return { totalBet, isAllInBet };
+    }
+
+    private applyBetOrRaise(
+        room: Room,
+        player: RoomPlayer,
+        betAmount: number,
+        totalBet: number,
+        betStructure: 'fixed' | 'pot-limit' | 'no-limit'
+    ): void {
+        const raiseSize = totalBet - room.gameState.currentBet;
+        const reopensAction = raiseSize >= room.gameState.minRaise;
+
+        player.stack -= betAmount;
+        player.bet = totalBet;
+        player.totalBet += betAmount;
+        room.gameState.pot.main += betAmount;
+        room.gameState.currentBet = totalBet;
+
+        if (reopensAction) {
+            room.gameState.minRaise = raiseSize;
+            room.streetStarterIndex = room.activePlayerIndex;
+            if (betStructure === 'fixed') {
+                room.gameState.raisesThisRound++;
+            }
+        }
+
+        room.lastAggressorIndex = room.activePlayerIndex;
+
+        if (player.stack === 0) {
+            player.status = 'ALL_IN';
+        }
+    }
+
+    private processAllIn(room: Room, player: RoomPlayer): string | null {
+        const allInAmount = player.stack;
+        const newTotal = player.bet + allInAmount;
+        const raiseSizeAllIn = newTotal - room.gameState.currentBet;
+        const reopensAllIn = raiseSizeAllIn >= room.gameState.minRaise;
+
+        player.bet = newTotal;
+        player.totalBet += allInAmount;
+        player.stack = 0;
+        player.status = 'ALL_IN';
+        room.gameState.pot.main += allInAmount;
+
+        if (newTotal > room.gameState.currentBet) {
+            room.gameState.currentBet = newTotal;
+            if (reopensAllIn) {
+                room.gameState.minRaise = raiseSizeAllIn;
+                room.streetStarterIndex = room.activePlayerIndex;
+            }
+            room.lastAggressorIndex = room.activePlayerIndex;
+            const variantConfig = getVariantConfig(room.gameState.gameVariant);
+            if (variantConfig.betStructure === 'fixed' && reopensAllIn) {
+                room.gameState.raisesThisRound++;
+            } else if (variantConfig.betStructure !== 'fixed') {
+                room.gameState.raisesThisRound++;
+            }
+        }
+        return null;
+    }
+
     /**
      * 次のプレイヤーに進む、またはストリートを進める
      */
     private advanceAction(room: Room): void {
-        // アクティブプレイヤー（FOLDED/ALL_IN以外）を取得
-        const actionablePlayers = room.players.filter(p =>
-            p !== null && p.status === 'ACTIVE'
-        );
+        const playerCounts = this.getPlayerCounts(room);
 
-        // アクション可能なプレイヤーとALL INプレイヤーを取得
-        const allInPlayers = room.players.filter(p =>
-            p !== null && p.status === 'ALL_IN'
-        );
-
-        const remainingPlayers = room.players.filter(p =>
-            p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
-        );
-
-        // 1人以下なら終了
-        if (remainingPlayers.length <= 1) {
-            this.endHand(room);
+        // 早期終了判定
+        const earlyEndResult = this.checkEarlyHandEnd(room, playerCounts);
+        if (earlyEndResult.shouldEnd) {
             return;
         }
-
-        // 全員ALL INの場合、自動的にリバーまで進めてショーダウン
-        if (actionablePlayers.length === 0 && allInPlayers.length >= 2) {
-            console.log('💥 All players ALL IN - auto-dealing to showdown');
-            // ランアウト情報を記録（クライアントがアニメーション表示に使用）
-            room.gameState.isRunout = true;
-            room.gameState.runoutPhase = room.gameState.status;
-            this.dealToShowdown(room);
-            this.endHand(room);
-            return;
-        }
-
-        // 1人だけアクティブで他がALL-INの場合、そのプレイヤーがコールしたらランアウト
-        // (相手がオールインでショートスタックの場合など)
-        if (actionablePlayers.length === 1 && allInPlayers.length >= 1) {
-            const activePlayer = actionablePlayers[0]!;
-            // 全員のベットが揃っている場合、ランアウトへ
-            const allBetsMatched = activePlayer.bet >= room.gameState.currentBet;
-            if (allBetsMatched) {
-                console.log('💥 One active player matched all-in bet - running out');
-                room.gameState.isRunout = true;
-                room.gameState.runoutPhase = room.gameState.status;
-                this.dealToShowdown(room);
-                this.endHand(room);
-                return;
-            }
-        }
-
-        // アクション可能なプレイヤーが0人の場合（全員ALL_INまたはフォールド）
-        // 残りプレイヤーが1人以下なら終了（勝者確定）
-        if (actionablePlayers.length === 0) {
-            // 1人のALL_INプレイヤーが残っている場合はそのまま終了
-            this.endHand(room);
-            return;
-        }
-
-        // 全員のベットが揃っているかチェック
-        const allBetsEqual = actionablePlayers.every(p =>
-            p!.bet === room.gameState.currentBet || p!.stack === 0
-        );
-
-        // 次のアクティブプレイヤーを探す
-        const nextIndex = this.dealer.getNextActivePlayer(room, room.activePlayerIndex);
-
-        // streetStarterがまだアクティブかチェック
-        const streetStarter = room.players[room.streetStarterIndex];
-        const streetStarterIsActive = streetStarter?.status === 'ACTIVE';
 
         // ラウンド終了判定
-        let roundComplete = false;
-
-        if (allBetsEqual) {
-            if (streetStarterIsActive) {
-                // 通常ケース: streetStarterに戻ったら完了
-                roundComplete = nextIndex === room.streetStarterIndex;
-            } else {
-                // streetStarterがALL_INまたはフォールドの場合
-                // 全員のベットが揃っていれば、アクティブプレイヤーが一周したとみなす
-                // 次のプレイヤーが現在のプレイヤーと同じ（1人だけ）か、-1なら完了
-                roundComplete = nextIndex === -1 ||
-                    nextIndex === room.activePlayerIndex ||
-                    actionablePlayers.length === 1;
-            }
-        }
+        const roundComplete = this.isRoundComplete(room, playerCounts);
+        const nextIndex = this.dealer.getNextActivePlayer(room, room.activePlayerIndex);
 
         if (roundComplete) {
             // 次のストリートへ
@@ -391,17 +392,116 @@ export class GameEngine {
     }
 
     /**
+     * プレイヤー分類を取得
+     */
+    private getPlayerCounts(room: Room) {
+        const actionablePlayers = room.players.filter(p =>
+            p !== null && p.status === 'ACTIVE'
+        );
+
+        const allInPlayers = room.players.filter(p =>
+            p !== null && p.status === 'ALL_IN'
+        );
+
+        const remainingPlayers = room.players.filter(p =>
+            p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
+        );
+
+        return { actionablePlayers, allInPlayers, remainingPlayers };
+    }
+
+    /**
+     * 早期終了判定（ALL INランアウト含む）
+     */
+    private checkEarlyHandEnd(room: Room, playerCounts: {
+        actionablePlayers: (Player | null)[];
+        allInPlayers: (Player | null)[];
+        remainingPlayers: (Player | null)[];
+    }): { shouldEnd: boolean } {
+        const { actionablePlayers, allInPlayers, remainingPlayers } = playerCounts;
+
+        // 1人以下なら終了
+        if (remainingPlayers.length <= 1) {
+            this.endHand(room);
+            return { shouldEnd: true };
+        }
+
+        // 全員ALL INの場合、自動的にリバーまで進めてショーダウン
+        if (actionablePlayers.length === 0 && allInPlayers.length >= 2) {
+            console.log('💥 All players ALL IN - auto-dealing to showdown');
+            room.gameState.isRunout = true;
+            room.gameState.runoutPhase = room.gameState.status;
+            this.dealToShowdown(room);
+            this.endHand(room);
+            return { shouldEnd: true };
+        }
+
+        // 1人だけアクティブで他がALL-INの場合、そのプレイヤーがコールしたらランアウト
+        if (actionablePlayers.length === 1 && allInPlayers.length >= 1) {
+            const activePlayer = actionablePlayers[0]!;
+            const allBetsMatched = activePlayer.bet >= room.gameState.currentBet;
+            if (allBetsMatched) {
+                console.log('💥 One active player matched all-in bet - running out');
+                room.gameState.isRunout = true;
+                room.gameState.runoutPhase = room.gameState.status;
+                this.dealToShowdown(room);
+                this.endHand(room);
+                return { shouldEnd: true };
+            }
+        }
+
+        // アクション可能なプレイヤーが0人の場合（全員ALL_INまたはフォールド）
+        if (actionablePlayers.length === 0) {
+            this.endHand(room);
+            return { shouldEnd: true };
+        }
+
+        return { shouldEnd: false };
+    }
+
+    /**
+     * ラウンド終了判定
+     */
+    private isRoundComplete(room: Room, playerCounts: {
+        actionablePlayers: (Player | null)[];
+        allInPlayers: (Player | null)[];
+        remainingPlayers: (Player | null)[];
+    }): boolean {
+        const { actionablePlayers } = playerCounts;
+
+        // 全員のベットが揃っているかチェック
+        const allBetsEqual = actionablePlayers.every(p =>
+            p!.bet === room.gameState.currentBet || p!.stack === 0
+        );
+
+        if (!allBetsEqual) {
+            return false;
+        }
+
+        // 次のアクティブプレイヤーを探す
+        const nextIndex = this.dealer.getNextActivePlayer(room, room.activePlayerIndex);
+
+        // streetStarterがまだアクティブかチェック
+        const streetStarter = room.players[room.streetStarterIndex];
+        const streetStarterIsActive = streetStarter?.status === 'ACTIVE';
+
+        if (streetStarterIsActive) {
+            // 通常ケース: streetStarterに戻ったら完了
+            return nextIndex === room.streetStarterIndex;
+        } else {
+            // streetStarterがALL_INまたはフォールドの場合
+            // 全員のベットが揃っていれば、アクティブプレイヤーが一周したとみなす
+            return nextIndex === -1 ||
+                nextIndex === room.activePlayerIndex ||
+                actionablePlayers.length === 1;
+        }
+    }
+
+    /**
      * 次のストリートに進む
      */
     nextStreet(room: Room): void {
-        // ベットをリセット
-        for (const player of room.players) {
-            if (player) {
-                player.bet = 0;
-            }
-        }
-        room.gameState.currentBet = 0;
-        room.gameState.raisesThisRound = 0; // レイズカウンタリセット
+        this.resetBetsForNewStreet(room);
 
         const phase = room.gameState.status;
         const variantConfig = getVariantConfig(room.gameState.gameVariant);
@@ -415,7 +515,25 @@ export class GameEngine {
             this.nextFlopStreet(room, phase);
         }
 
-        // ストリート進行後、再度ALL INチェック
+        const runoutCheck = this.checkPostStreetRunout(room, variantConfig);
+        if (runoutCheck.shouldReturn) {
+            return;
+        }
+
+        this.setStreetStartPlayer(room, variantConfig);
+    }
+
+    private resetBetsForNewStreet(room: Room): void {
+        for (const player of room.players) {
+            if (player) {
+                player.bet = 0;
+            }
+        }
+        room.gameState.currentBet = 0;
+        room.gameState.raisesThisRound = 0;
+    }
+
+    private checkPostStreetRunout(room: Room, variantConfig: any): { shouldReturn: boolean } {
         const actionablePlayers = room.players.filter(p =>
             p !== null && p.status === 'ACTIVE'
         );
@@ -424,43 +542,39 @@ export class GameEngine {
             p !== null && p.status === 'ALL_IN'
         );
 
-        // SHOWDOWNに到達した場合はリターン
         if (room.gameState.status === 'SHOWDOWN') {
-            return;
+            return { shouldReturn: true };
         }
 
         room.gameState.minRaise = variantConfig.betStructure === 'fixed'
             ? this.getFixedBetSize(room)
             : room.config.bigBlind;
 
-        // 全員ALL INなら自動的に次へ進む
         if (actionablePlayers.length === 0 && allInPlayers.length >= 2) {
             console.log('💥 All players still ALL IN - continuing auto-deal');
             this.nextStreet(room);
-            return;
+            return { shouldReturn: true };
         }
 
-        // アクション可能なプレイヤーが1人で、相手が全員ALL-INの場合
-        // その1人は誰にも対抗できないので、ランアウトで残りのカードを配る
         if (actionablePlayers.length === 1 && allInPlayers.length >= 1) {
             console.log('💥 Only one active player vs all-in - running out');
-            // ランアウト情報を記録（クライアントがアニメーション表示に使用）
             room.gameState.isRunout = true;
             room.gameState.runoutPhase = room.gameState.status;
             this.dealToShowdown(room);
             this.endHand(room);
-            return;
+            return { shouldReturn: true };
         }
 
-        // ボタンの次のアクティブプレイヤーから開始（Studは別ロジック）
+        return { shouldReturn: false };
+    }
+
+    private setStreetStartPlayer(room: Room, variantConfig: any): void {
         if (variantConfig.hasButton) {
             room.activePlayerIndex = this.dealer.getNextActivePlayer(room, room.dealerBtnIndex);
         } else {
-            // Stud: 最強/最弱のアップカードを持つプレイヤーから
             const isRazz = room.gameState.gameVariant === 'RAZZ';
             room.activePlayerIndex = this.dealer.getStudActionStartIndex(room, isRazz);
         }
-        // 新しいストリートの開始プレイヤーを記録
         room.streetStarterIndex = room.activePlayerIndex;
     }
 
@@ -693,20 +807,48 @@ export class GameEngine {
             p !== null && p.socketId !== playerId && p.status === 'ACTIVE'
         );
 
-        // コール額を計算
         const callAmount = Math.max(0, room.gameState.currentBet - player.bet);
-        const wouldCallAllIn = callAmount >= player.stack;
 
-        if (player.bet >= room.gameState.currentBet) {
-            // ベットがない（または既にコール済み）→ チェック可能、フォールド不可
+        // 基本アクション (CHECK vs FOLD/CALL)
+        this.addBaseActions(actions, player, room.gameState.currentBet);
+
+        // BET/RAISE
+        if (this.canPlayerRaise(room, player, variantConfig, callAmount, otherActivePlayers)) {
+            actions.push(room.gameState.currentBet === 0 ? 'BET' : 'RAISE');
+        }
+
+        // ALL-IN
+        if (this.canPlayerAllIn(player, variantConfig, callAmount)) {
+            actions.push('ALL_IN');
+        }
+
+        return actions;
+    }
+
+    /**
+     * 基本アクション (CHECK vs FOLD/CALL) を追加
+     */
+    private addBaseActions(actions: ActionType[], player: RoomPlayer, currentBet: number): void {
+        if (player.bet >= currentBet) {
+            // ベットがない（または既にコール済み）→ チェック可能
             actions.push('CHECK');
         } else {
             // ベットに直面 → フォールドまたはコール
             actions.push('FOLD');
             actions.push('CALL');
         }
+    }
 
-        // BET/RAISEの可否判定
+    /**
+     * BET/RAISE が可能かを判定
+     */
+    private canPlayerRaise(
+        room: Room,
+        player: RoomPlayer,
+        variantConfig: any,
+        callAmount: number,
+        otherActivePlayers: any[]
+    ): boolean {
         const canAffordRaise = player.stack > callAmount;
 
         // Fixed-Limit: キャップチェック
@@ -714,23 +856,16 @@ export class GameEngine {
             room.gameState.raisesThisRound >= this.getCapLimit(room);
 
         // 他にアクティブなプレイヤーがいない場合（全員ALL-INまたはフォールド）、レイズ不可
-        const canRaise = canAffordRaise && !isCapped && otherActivePlayers.length > 0;
+        return canAffordRaise && !isCapped && otherActivePlayers.length > 0;
+    }
 
-        if (canRaise) {
-            if (room.gameState.currentBet === 0) {
-                actions.push('BET');
-            } else {
-                actions.push('RAISE');
-            }
-        }
-
-        // ALL-IN: No-Limitのみ、かつコールがALL-INにならない場合のみ表示
-        // （コールがALL-INになる場合は、CALLを選べばALL-INになる）
-        if (variantConfig.betStructure === 'no-limit' && !wouldCallAllIn && player.stack > 0) {
-            actions.push('ALL_IN');
-        }
-
-        return actions;
+    /**
+     * ALL-IN が可能かを判定
+     */
+    private canPlayerAllIn(player: RoomPlayer, variantConfig: any, callAmount: number): boolean {
+        const wouldCallAllIn = callAmount >= player.stack;
+        // No-Limitのみ、かつコールがALL-INにならない場合のみ表示
+        return variantConfig.betStructure === 'no-limit' && !wouldCallAllIn && player.stack > 0;
     }
 
     /**
@@ -857,34 +992,56 @@ export class GameEngine {
         const phase = room.gameState.status;
         const variantConfig = getVariantConfig(room.gameState.gameVariant);
 
-        // Stud系: 5th Street以降はBig Bet
         if (variantConfig.communityCardType === 'stud') {
-            if (phase === 'FIFTH_STREET' || phase === 'SIXTH_STREET' || phase === 'SEVENTH_STREET') {
-                return bigBet;
-            }
-            return smallBet;
+            return this.getFixedBetSizeStud(phase, smallBet, bigBet);
         }
 
-        // Draw系: 後半のベッティングラウンドはBig Bet
         if (variantConfig.hasDrawPhase) {
-            const drawRounds = variantConfig.drawRounds || 3;
-            // ベッティングラウンド数 = drawRounds + 1 (predraw + 各ドロー後)
-            // Big Betは後半から: Math.ceil((drawRounds+1) / 2)
-            // 3ラウンド: street 2,3 = Big Bet (SECOND_DRAW, THIRD_DRAW)
-            const bigBetStartStreet = Math.ceil((drawRounds + 1) / 2);
-            if (room.gameState.street >= bigBetStartStreet) {
-                return bigBet;
-            }
-            return smallBet;
+            return this.getFixedBetSizeDraw(room, variantConfig, phase, smallBet, bigBet);
         }
 
+        return this.getFixedBetSizeFlop(room, smallBet, bigBet);
+    }
+
+    private getFixedBetSizeStud(phase: GamePhase, smallBet: number, bigBet: number): number {
+        // Stud系: 5th Street以降はBig Bet
+        if (phase === 'FIFTH_STREET' || phase === 'SIXTH_STREET' || phase === 'SEVENTH_STREET') {
+            return bigBet;
+        }
+        return smallBet;
+    }
+
+    private getFixedBetSizeDraw(
+        room: Room,
+        variantConfig: any,
+        phase: GamePhase,
+        smallBet: number,
+        bigBet: number
+    ): number {
+        const drawRounds = variantConfig.drawRounds || 3;
+        // Phase-based判定（防御的）: statusを直接チェック
+        // Triple Draw: PREDRAW, FIRST_DRAW = Small Bet, SECOND_DRAW, THIRD_DRAW = Big Bet
+        if (phase === 'SECOND_DRAW' || phase === 'THIRD_DRAW' || phase === 'FOURTH_DRAW') {
+            return bigBet;
+        }
+        // Fallback: street-based判定
+        // ベッティングラウンド数 = drawRounds + 1 (predraw + 各ドロー後)
+        // Big Betは後半から: Math.ceil((drawRounds+1) / 2)
+        // 3ラウンド: street 2,3 = Big Bet (SECOND_DRAW, THIRD_DRAW)
+        const bigBetStartStreet = Math.ceil((drawRounds + 1) / 2);
+        if (room.gameState.street >= bigBetStartStreet) {
+            return bigBet;
+        }
+        return smallBet;
+    }
+
+    private getFixedBetSizeFlop(room: Room, smallBet: number, bigBet: number): number {
         // Flop系: 後半のストリートはBig Bet
         // 標準[3,1,1]: street 2(Turn),3(River) = Big Bet
         // Ocean[3,1,1,1]: street 2(Turn),3(River),4(Ocean) = Big Bet
         if (room.gameState.street >= 2) {
             return bigBet;
         }
-
         return smallBet;
     }
 
@@ -993,4 +1150,25 @@ export class GameEngine {
 
         room.gameState.status = 'SEVENTH_STREET' as any;
     }
+
+    /**
+     * テスト用: privateメソッドへのアクセス
+     */
+    __testing__ = {
+        processFold: (player: Player) => this.processFold(player as any),
+        processCheck: (room: Room, player: Player) => this.processCheck(room, player as any),
+        processCall: (room: Room, player: Player) => this.processCall(room, player as any),
+        processBetOrRaise: (room: Room, player: Player, action: PlayerAction) =>
+            this.processBetOrRaise(room, player as any, action),
+        processAllIn: (room: Room, player: Player) => this.processAllIn(room, player as any),
+        applyAction: (room: Room, player: Player, action: PlayerAction) =>
+            this.applyAction(room, player as any, action),
+        getMinBetTo: (room: Room, player: Player) => this.getMinBetTo(room, player),
+        getFixedBetSize: (room: Room) => this.getFixedBetSize(room),
+        calculatePotLimitMax: (room: Room, player: Player) => this.calculatePotLimitMax(room, player),
+        getCapLimit: (room: Room) => this.getCapLimit(room),
+        getPlayerCounts: (room: Room) => this.getPlayerCounts(room),
+        checkEarlyHandEnd: (room: Room, playerCounts: any) => this.checkEarlyHandEnd(room, playerCounts),
+        isRoundComplete: (room: Room, playerCounts: any) => this.isRoundComplete(room, playerCounts)
+    };
 }

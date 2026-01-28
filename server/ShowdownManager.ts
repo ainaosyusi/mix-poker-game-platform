@@ -36,6 +36,35 @@ function parseCards(cards: string[]): Card[] {
     return cards.map(parseCard);
 }
 
+/**
+ * 配列からn個の要素の組み合わせを生成
+ * @param arr 元の配列
+ * @param n 選択する要素数
+ * @returns n個の要素の組み合わせの配列
+ */
+function combinations<T>(arr: T[], n: number): T[][] {
+    if (n === 0) return [[]];
+    if (n > arr.length) return [];
+
+    const result: T[][] = [];
+
+    function helper(start: number, current: T[]) {
+        if (current.length === n) {
+            result.push([...current]);
+            return;
+        }
+
+        for (let i = start; i <= arr.length - (n - current.length); i++) {
+            current.push(arr[i]);
+            helper(i + 1, current);
+            current.pop();
+        }
+    }
+
+    helper(0, []);
+    return result;
+}
+
 // 7枚から最強の5枚を選ぶ
 function getBestFiveCards(cards: Card[]): Card[] {
     if (cards.length <= 5) return cards;
@@ -44,26 +73,17 @@ function getBestFiveCards(cards: Card[]): Card[] {
     let bestHand = cards.slice(0, 5);
     let bestRank = evaluateHand(bestHand);
 
-    for (let i = 0; i < cards.length; i++) {
-        for (let j = i + 1; j < cards.length; j++) {
-            for (let k = j + 1; k < cards.length; k++) {
-                for (let l = k + 1; l < cards.length; l++) {
-                    for (let m = l + 1; m < cards.length; m++) {
-                        const hand = [cards[i], cards[j], cards[k], cards[l], cards[m]];
-                        const rank = evaluateHand(hand);
-                        if (rank.rank > bestRank.rank) {
-                            bestHand = hand;
-                            bestRank = rank;
-                        } else if (rank.rank === bestRank.rank) {
-                            // 同じ役の場合、高位カードで比較
-                            const comparison = compareHands(hand, bestHand);
-                            if (comparison > 0) {
-                                bestHand = hand;
-                                bestRank = rank;
-                            }
-                        }
-                    }
-                }
+    for (const hand of combinations(cards, 5)) {
+        const rank = evaluateHand(hand);
+        if (rank.rank > bestRank.rank) {
+            bestHand = hand;
+            bestRank = rank;
+        } else if (rank.rank === bestRank.rank) {
+            // 同じ役の場合、高位カードで比較
+            const comparison = compareHands(hand, bestHand);
+            if (comparison > 0) {
+                bestHand = hand;
+                bestRank = rank;
             }
         }
     }
@@ -82,28 +102,22 @@ function getBestPLOFiveCards(holeCards: Card[], boardCards: Card[]): Card[] {
     let bestRank = evaluateHand(bestHand);
 
     // 手札から2枚選ぶ組み合わせ (C(4,2) = 6通り、または C(n,2))
-    for (let h1 = 0; h1 < holeCards.length; h1++) {
-        for (let h2 = h1 + 1; h2 < holeCards.length; h2++) {
-            // ボードから3枚選ぶ組み合わせ (C(5,3) = 10通り)
-            for (let b1 = 0; b1 < boardCards.length; b1++) {
-                for (let b2 = b1 + 1; b2 < boardCards.length; b2++) {
-                    for (let b3 = b2 + 1; b3 < boardCards.length; b3++) {
-                        const hand = [
-                            holeCards[h1], holeCards[h2],
-                            boardCards[b1], boardCards[b2], boardCards[b3]
-                        ];
-                        const rank = evaluateHand(hand);
-                        if (rank.rank > bestRank.rank) {
-                            bestHand = hand;
-                            bestRank = rank;
-                        } else if (rank.rank === bestRank.rank) {
-                            const comparison = compareHands(hand, bestHand);
-                            if (comparison > 0) {
-                                bestHand = hand;
-                                bestRank = rank;
-                            }
-                        }
-                    }
+    const holeCombos = combinations(holeCards, 2);
+    // ボードから3枚選ぶ組み合わせ (C(5,3) = 10通り)
+    const boardCombos = combinations(boardCards, 3);
+
+    for (const holeCombo of holeCombos) {
+        for (const boardCombo of boardCombos) {
+            const hand = [...holeCombo, ...boardCombo];
+            const rank = evaluateHand(hand);
+            if (rank.rank > bestRank.rank) {
+                bestHand = hand;
+                bestRank = rank;
+            } else if (rank.rank === bestRank.rank) {
+                const comparison = compareHands(hand, bestHand);
+                if (comparison > 0) {
+                    bestHand = hand;
+                    bestRank = rank;
                 }
             }
         }
@@ -122,24 +136,18 @@ function getBestPLOLowFiveCards(holeCards: Card[], boardCards: Card[]): Card[] |
     let bestLow = evaluateLowHand8OrBetter([]);
 
     // 手札から2枚選ぶ組み合わせ
-    for (let h1 = 0; h1 < holeCards.length; h1++) {
-        for (let h2 = h1 + 1; h2 < holeCards.length; h2++) {
-            // ボードから3枚選ぶ組み合わせ
-            for (let b1 = 0; b1 < boardCards.length; b1++) {
-                for (let b2 = b1 + 1; b2 < boardCards.length; b2++) {
-                    for (let b3 = b2 + 1; b3 < boardCards.length; b3++) {
-                        const hand = [
-                            holeCards[h1], holeCards[h2],
-                            boardCards[b1], boardCards[b2], boardCards[b3]
-                        ];
-                        const lowResult = evaluateLowHand8OrBetter(hand);
-                        if (lowResult.valid) {
-                            if (!bestHand || compareLowHands(lowResult, bestLow) > 0) {
-                                bestHand = hand;
-                                bestLow = lowResult;
-                            }
-                        }
-                    }
+    const holeCombos = combinations(holeCards, 2);
+    // ボードから3枚選ぶ組み合わせ
+    const boardCombos = combinations(boardCards, 3);
+
+    for (const holeCombo of holeCombos) {
+        for (const boardCombo of boardCombos) {
+            const hand = [...holeCombo, ...boardCombo];
+            const lowResult = evaluateLowHand8OrBetter(hand);
+            if (lowResult.valid) {
+                if (!bestHand || compareLowHands(lowResult, bestLow) > 0) {
+                    bestHand = hand;
+                    bestLow = lowResult;
                 }
             }
         }
@@ -156,21 +164,12 @@ function getBestLowFiveCards(cards: Card[]): Card[] | null {
     let bestLow = evaluateLowHand8OrBetter([]);
 
     // すべての5枚の組み合わせを試す
-    for (let i = 0; i < cards.length; i++) {
-        for (let j = i + 1; j < cards.length; j++) {
-            for (let k = j + 1; k < cards.length; k++) {
-                for (let l = k + 1; l < cards.length; l++) {
-                    for (let m = l + 1; m < cards.length; m++) {
-                        const hand = [cards[i], cards[j], cards[k], cards[l], cards[m]];
-                        const lowResult = evaluateLowHand8OrBetter(hand);
-                        if (lowResult.valid) {
-                            if (!bestHand || compareLowHands(lowResult, bestLow) > 0) {
-                                bestHand = hand;
-                                bestLow = lowResult;
-                            }
-                        }
-                    }
-                }
+    for (const hand of combinations(cards, 5)) {
+        const lowResult = evaluateLowHand8OrBetter(hand);
+        if (lowResult.valid) {
+            if (!bestHand || compareLowHands(lowResult, bestLow) > 0) {
+                bestHand = hand;
+                bestLow = lowResult;
             }
         }
     }
@@ -185,20 +184,11 @@ function getBestRazzFiveCards(cards: Card[]): Card[] {
     let bestHand = cards.slice(0, 5);
     let bestLow = evaluateRazzHand(bestHand);
 
-    for (let i = 0; i < cards.length; i++) {
-        for (let j = i + 1; j < cards.length; j++) {
-            for (let k = j + 1; k < cards.length; k++) {
-                for (let l = k + 1; l < cards.length; l++) {
-                    for (let m = l + 1; m < cards.length; m++) {
-                        const hand = [cards[i], cards[j], cards[k], cards[l], cards[m]];
-                        const lowResult = evaluateRazzHand(hand);
-                        if (compareLowHands(lowResult, bestLow) > 0) {
-                            bestHand = hand;
-                            bestLow = lowResult;
-                        }
-                    }
-                }
-            }
+    for (const hand of combinations(cards, 5)) {
+        const lowResult = evaluateRazzHand(hand);
+        if (compareLowHands(lowResult, bestLow) > 0) {
+            bestHand = hand;
+            bestLow = lowResult;
         }
     }
 

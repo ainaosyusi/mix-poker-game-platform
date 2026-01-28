@@ -25,6 +25,22 @@ function createPlayer(
 }
 
 function createRoom(players: (Player | null)[], gameVariant: string, status: any): Room {
+    // status に応じた正しい street を設定
+    let street = 1;
+    if (status === 'PREFLOP' || status === 'PREDRAW' || status === 'THIRD_STREET') {
+        street = 0;
+    } else if (status === 'FLOP' || status === 'FIRST_DRAW' || status === 'FOURTH_STREET') {
+        street = 1;
+    } else if (status === 'TURN' || status === 'SECOND_DRAW' || status === 'FIFTH_STREET') {
+        street = 2;
+    } else if (status === 'RIVER' || status === 'THIRD_DRAW' || status === 'SIXTH_STREET') {
+        street = 3;
+    } else if (status === 'OCEAN' || status === 'FOURTH_DRAW' || status === 'SEVENTH_STREET') {
+        street = 4;
+    } else if (status === 'SHOWDOWN') {
+        street = 5;
+    }
+
     return {
         id: 'test-room',
         hostId: 'host',
@@ -52,7 +68,7 @@ function createRoom(players: (Player | null)[], gameVariant: string, status: any
         createdAt: Date.now(),
         gameState: {
             status,
-            street: 1,
+            street,
             gameVariant,
             board: [],
             pot: { main: 0, side: [] },

@@ -4,6 +4,7 @@
  */
 
 import { io, Socket } from 'socket.io-client';
+import type { ActionType } from '../types.js';
 
 const SERVER_URL = process.env.TEST_SERVER_URL || 'http://localhost:3000';
 
@@ -83,6 +84,32 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function waitForAnyTurn(players: Socket[], timeout = 10000): Promise<{ socket: Socket; data: any } | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    }, timeout);
+
+    for (const socket of players) {
+      socket.once('your-turn', (data) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ socket, data });
+      });
+    }
+  });
+}
+
+async function requestRoomState(socket: Socket, timeout = 5000): Promise<any> {
+  const statePromise = waitForEvent(socket, 'room-state-update', timeout);
+  socket.emit('request-room-state');
+  return statePromise;
+}
+
 // ========================================
 // Room Helpers
 // ========================================
@@ -143,6 +170,11 @@ async function quickJoinRoom(socket: Socket, roomId: string, buyIn: number) {
   const sitPromise = waitForEvent(socket, 'sit-down-success', 7000);
   socket.emit('quick-join', { roomId, buyIn });
   return Promise.all([joinPromise, sitPromise]);
+}
+
+function getPlayerFromState(state: any, socketId: string) {
+  if (!state || !Array.isArray(state.players)) return null;
+  return state.players.find((p: any) => p?.socketId === socketId) || null;
 }
 
 // ========================================
@@ -551,18 +583,25 @@ async function testLeaveRoom() {
     const activeSocket = turnResult.socket;
     const activeId = activeSocket!.id;
 
-    const updatePromise = waitForEventWhere<any>(
-      activeSocket === playerA ? playerB : playerA,
-      'room-state-update',
-      (data) => Array.isArray(data.players) && !data.players.some((p: any) => p?.socketId === activeId),
-      15000
-    );
+    const observer = activeSocket === playerA ? playerB : playerA;
     activeSocket!.emit('leave-room');
 
-    const update = await updatePromise;
+    const deadline = Date.now() + 15000;
+    let removed = false;
+    while (Date.now() < deadline) {
+      const statePromise = waitForEvent(observer!, 'room-state-update', 5000).catch(() => null);
+      observer!.emit('request-room-state');
+      const state: any = await statePromise;
+      if (state && Array.isArray(state.players)) {
+        if (!state.players.some((p: any) => p?.socketId === activeId)) {
+          removed = true;
+          break;
+        }
+      }
+      await sleep(300);
+    }
 
-    const stillThere = update.players.some((p: any) => p?.socketId === activeId);
-    if (!stillThere) {
+    if (removed) {
       pass('INT-03', 'Leave-Room During Hand', 'Leaver removed after hand resolution');
     } else {
       fail('INT-03', 'Leave-Room During Hand', 'Leaver still present after leave-room');
@@ -692,6 +731,195 @@ async function testMultiPlayerRoomState() {
 }
 
 // ========================================
+// Integration: Pot-Limit Max Bet Boundary
+// ========================================
+
+async function testPotLimitMaxBetBoundary() {
+  log('Testing INT-06: Pot-Limit Max Bet Boundary');
+
+  let playerA: Socket | null = null;
+  let playerB: Socket | null = null;
+
+  try {
+    playerA = await createClient('PotLimitA');
+    playerB = await createClient('PotLimitB');
+
+    const roomList = await getRoomList(playerA);
+    const room = selectRoom(roomList, { preferredIds: ['mix-plo'], minOpenSeats: 2, requireEmpty: true });
+    const buyIn = getDefaultBuyIn(room);
+
+    await quickJoinRoom(playerA, room.id, buyIn);
+    playerA.emit('set-game-variant', { variant: 'PLO' });
+
+    await quickJoinRoom(playerB, room.id, buyIn);
+
+    await Promise.all([
+      waitForEvent(playerA, 'game-started', 12000),
+      waitForEvent(playerB, 'game-started', 12000)
+    ]);
+
+    const turnResult = await waitForAnyTurn([playerA, playerB], 12000);
+    if (!turnResult) {
+      fail('INT-06', 'Pot-Limit Max Bet Boundary', 'No turn event received');
+      return;
+    }
+
+    const { socket, data } = turnResult;
+    if (!data?.actionToken) {
+      fail('INT-06', 'Pot-Limit Max Bet Boundary', 'Missing actionToken on your-turn');
+      return;
+    }
+
+    if (data.betStructure !== 'pot-limit') {
+      fail('INT-06', 'Pot-Limit Max Bet Boundary', `Unexpected betStructure: ${data.betStructure}`);
+      return;
+    }
+
+    const state = await requestRoomState(socket, 7000);
+    const me = getPlayerFromState(state, socket.id);
+    if (!me) {
+      fail('INT-06', 'Pot-Limit Max Bet Boundary', 'Player not found in room-state');
+      return;
+    }
+
+    const maxBetTo = data.maxBet;
+    if (!Number.isFinite(maxBetTo)) {
+      fail('INT-06', 'Pot-Limit Max Bet Boundary', 'Invalid maxBet from your-turn');
+      return;
+    }
+
+    if (maxBetTo >= (me.stack + me.bet)) {
+      fail('INT-06', 'Pot-Limit Max Bet Boundary', 'Max bet equals stack; pot-limit boundary not testable');
+      return;
+    }
+
+    const invalidTotal = maxBetTo + 1;
+    const additionalAmount = invalidTotal - (me.bet || 0);
+    const actionType: ActionType = data.validActions.includes('BET') ? 'BET' : 'RAISE';
+
+    const invalidPromise = waitForEvent(socket, 'action-invalid', 7000);
+    socket.emit('player-action', {
+      type: actionType,
+      amount: additionalAmount,
+      actionToken: data.actionToken
+    });
+
+    const invalid = await invalidPromise;
+    if (invalid?.reason && String(invalid.reason).includes('Maximum bet')) {
+      pass('INT-06', 'Pot-Limit Max Bet Boundary', invalid.reason);
+    } else {
+      fail('INT-06', 'Pot-Limit Max Bet Boundary', `Unexpected rejection: ${invalid?.reason}`);
+    }
+  } catch (error: any) {
+    fail('INT-06', 'Pot-Limit Max Bet Boundary', error.message);
+  } finally {
+    if (playerA) playerA.disconnect();
+    if (playerB) playerB.disconnect();
+  }
+}
+
+// ========================================
+// Integration: Fixed-Limit Cap Boundary
+// ========================================
+
+async function testFixedLimitCapBoundary() {
+  log('Testing INT-07: Fixed-Limit Cap Boundary');
+
+  let players: Socket[] = [];
+
+  try {
+    players = await Promise.all([
+      createClient('FixedLimitA'),
+      createClient('FixedLimitB'),
+      createClient('FixedLimitC'),
+    ]);
+
+    const roomList = await getRoomList(players[0]);
+    const room = selectRoom(roomList, { preferredIds: ['mix-8game'], minOpenSeats: 3, requireEmpty: true });
+    const buyIn = getDefaultBuyIn(room);
+
+    await quickJoinRoom(players[0], room.id, buyIn);
+    players[0].emit('set-game-variant', { variant: '2-7_TD' });
+
+    await quickJoinRoom(players[1], room.id, buyIn);
+    await quickJoinRoom(players[2], room.id, buyIn);
+
+    await Promise.all(players.map(player => waitForEvent(player, 'game-started', 12000)));
+
+    const capLimit = 4;
+    const deadline = Date.now() + 25000;
+
+    while (Date.now() < deadline) {
+      const turnResult = await waitForAnyTurn(players, 12000);
+      if (!turnResult) {
+        fail('INT-07', 'Fixed-Limit Cap Boundary', 'No turn event received');
+        return;
+      }
+
+      const { socket, data } = turnResult;
+      if (!data?.actionToken) {
+        fail('INT-07', 'Fixed-Limit Cap Boundary', 'Missing actionToken on your-turn');
+        return;
+      }
+
+      if (data.betStructure !== 'fixed') {
+        fail('INT-07', 'Fixed-Limit Cap Boundary', `Unexpected betStructure: ${data.betStructure}`);
+        return;
+      }
+
+      const state = await requestRoomState(socket, 7000);
+      const me = getPlayerFromState(state, socket.id);
+      if (!me) {
+        fail('INT-07', 'Fixed-Limit Cap Boundary', 'Player not found in room-state');
+        return;
+      }
+
+      const raisesThisRound = state?.gameState?.raisesThisRound ?? 0;
+      const canRaise = data.validActions.includes('BET') || data.validActions.includes('RAISE');
+
+      if (raisesThisRound >= capLimit && !canRaise) {
+        pass('INT-07', 'Fixed-Limit Cap Boundary', `raisesThisRound=${raisesThisRound}, raise disabled`);
+        return;
+      }
+
+      if (canRaise) {
+        const actionType: ActionType = data.validActions.includes('BET') ? 'BET' : 'RAISE';
+        const fixedBetSize = data.fixedBetSize || data.minRaise;
+        const totalBetTo = data.currentBet + fixedBetSize;
+        const additionalAmount = totalBetTo - (me.bet || 0);
+
+        const invalidPromise = waitForEvent(socket, 'action-invalid', 5000).catch(() => null);
+        socket.emit('player-action', {
+          type: actionType,
+          amount: additionalAmount,
+          actionToken: data.actionToken
+        });
+
+        const invalid = await invalidPromise;
+        if (invalid) {
+          const reason = String(invalid.reason || '');
+          if (reason.includes('capped') || reason.includes('valid action')) {
+            pass('INT-07', 'Fixed-Limit Cap Boundary', reason);
+            return;
+          }
+          fail('INT-07', 'Fixed-Limit Cap Boundary', reason);
+          return;
+        }
+      } else {
+        const fallbackAction: ActionType = data.validActions.includes('CALL') ? 'CALL' : 'CHECK';
+        socket.emit('player-action', { type: fallbackAction, actionToken: data.actionToken });
+      }
+    }
+
+    fail('INT-07', 'Fixed-Limit Cap Boundary', 'Cap not observed before timeout');
+  } catch (error: any) {
+    fail('INT-07', 'Fixed-Limit Cap Boundary', error.message);
+  } finally {
+    players.forEach(player => player.disconnect());
+  }
+}
+
+// ========================================
 // Main Test Runner
 // ========================================
 
@@ -718,6 +946,8 @@ async function runAllTests() {
   await testLeaveRoom();
   await testDisconnectCleanup();
   await testMultiPlayerRoomState();
+  await testPotLimitMaxBetBoundary();
+  await testFixedLimitCapBoundary();
 
   // Print summary
   console.log('\n========================================');

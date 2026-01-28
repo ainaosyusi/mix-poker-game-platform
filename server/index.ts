@@ -399,6 +399,85 @@ function getRoomIdFromSocket(socket: any): string | null {
   return roomEntry ? roomEntry.slice(5) : null;
 }
 
+function shouldAutoFold(
+  engine: GameEngine | undefined,
+  isActivePlayer: boolean,
+  player: RoomPlayer
+): boolean {
+  return Boolean(engine && isActivePlayer && player.status === 'ACTIVE');
+}
+
+function handleInGameExit(
+  socket: any,
+  roomId: string,
+  room: any,
+  seatIndex: number,
+  leaveRoom: boolean,
+  io: Server
+) {
+  const player = room.players[seatIndex]!;
+  player.pendingLeave = true;
+  player.pendingSitOut = true;
+  player.pendingJoin = false;
+  player.waitingForBB = false;
+  player.disconnected = true;
+
+  const engine = gameEngines.get(roomId);
+  const isActivePlayer = room.activePlayerIndex === seatIndex;
+  let actionProcessed = false;
+
+  if (shouldAutoFold(engine, isActivePlayer, player)) {
+    const result = engine!.processAction(room, {
+      playerId: socket.id,
+      type: 'FOLD' as ActionType,
+      timestamp: Date.now()
+    });
+
+    if (result.success) {
+      processPostAction(roomId, room, engine!, io);
+      actionProcessed = true;
+    } else {
+      player.status = 'FOLDED';
+    }
+  } else if (player.status === 'ACTIVE') {
+    player.status = 'FOLDED';
+  }
+
+  if (leaveRoom) {
+    socket.leave(`room:${roomId}`);
+  }
+
+  if (!actionProcessed) {
+    broadcastRoomState(roomId, room, io);
+    io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+  }
+}
+
+function handleWaitingExit(
+  socket: any,
+  roomId: string,
+  leaveRoom: boolean,
+  io: Server
+) {
+  roomManager.standUp(roomId, socket.id);
+  if (leaveRoom) {
+    socket.leave(`room:${roomId}`);
+  }
+
+  const roomStillExists = roomManager.getRoomById(roomId);
+  if (roomStillExists) {
+    broadcastRoomState(roomId, roomStillExists, io);
+  } else {
+    gameEngines.delete(roomId);
+    roomActionInFlight.delete(roomId);
+    if (!leaveRoom) {
+      socket.leave(`room:${roomId}`);
+    }
+  }
+
+  io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+}
+
 function handleRoomExit(
   socket: any,
   roomId: string,
@@ -424,64 +503,424 @@ function handleRoomExit(
     return;
   }
 
-  const player = room.players[seatIndex]!;
   const isInHand = room.gameState.status !== 'WAITING';
 
   if (isInHand) {
-    player.pendingLeave = true;
-    player.pendingSitOut = true;
-    player.pendingJoin = false;
-    player.waitingForBB = false;
-    player.disconnected = true;
-
-    const engine = gameEngines.get(roomId);
-    const isActivePlayer = room.activePlayerIndex === seatIndex;
-    let actionProcessed = false;
-
-    if (engine && isActivePlayer && player.status === 'ACTIVE') {
-      const result = engine.processAction(room, {
-        playerId: socket.id,
-        type: 'FOLD' as ActionType,
-        timestamp: Date.now()
-      });
-
-      if (result.success) {
-        processPostAction(roomId, room, engine, io);
-        actionProcessed = true;
-      } else {
-        player.status = 'FOLDED';
-      }
-    } else if (player.status === 'ACTIVE') {
-      player.status = 'FOLDED';
-    }
-
-    if (leaveRoom) {
-      socket.leave(`room:${roomId}`);
-    }
-    if (!actionProcessed) {
-      broadcastRoomState(roomId, room, io);
-      io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
-    }
+    handleInGameExit(socket, roomId, room, seatIndex, leaveRoom, io);
     return;
   }
 
-  roomManager.standUp(roomId, socket.id);
-  if (leaveRoom) {
-    socket.leave(`room:${roomId}`);
+  handleWaitingExit(socket, roomId, leaveRoom, io);
+}
+
+function getRoomIdOrError(socket: any): string | null {
+  const roomId = getRoomIdFromSocket(socket);
+  if (!roomId) {
+    socket.emit('error', { message: 'You are not in any room' });
+    return null;
+  }
+  return roomId;
+}
+
+function getRoomOrError(roomId: string, socket: any) {
+  const room = roomManager.getRoomById(roomId);
+  if (!room) {
+    socket.emit('error', { message: 'Room not found' });
+    return null;
+  }
+  return room;
+}
+
+function getEngineOrError(roomId: string, socket: any) {
+  const engine = gameEngines.get(roomId);
+  if (!engine) {
+    socket.emit('error', { message: 'Game not started' });
+    return null;
+  }
+  return engine;
+}
+
+function checkActionRateLimit(socket: any, roomId: string, now: number): boolean {
+  const rate = actionRateLimit.get(socket.id);
+  if (!rate || now - rate.windowStart > ACTION_RATE_LIMIT_WINDOW_MS) {
+    actionRateLimit.set(socket.id, { count: 1, windowStart: now });
+    return true;
   }
 
-  const roomStillExists = roomManager.getRoomById(roomId);
-  if (roomStillExists) {
-    broadcastRoomState(roomId, roomStillExists, io);
+  rate.count += 1;
+  if (rate.count > ACTION_RATE_LIMIT_MAX) {
+    const ip = socket.handshake.address;
+    console.warn(`⚠️ Rate limit: ${socket.id} (${ip}) ${rate.count}/${ACTION_RATE_LIMIT_WINDOW_MS}ms`);
+    socket.emit('action-invalid', { reason: 'Too many actions' });
+    logEvent('rate_limited', { roomId, playerId: socket.id, ip, count: rate.count });
+    incrementMetric('rate_limited');
+    return false;
+  }
+
+  return true;
+}
+
+function validateActionToken(socket: any, roomId: string, token: string | undefined, now: number): boolean {
+  const expectedToken = actionTokens.get(socket.id);
+  if (!token || !expectedToken || token !== expectedToken.token) {
+    socket.emit('action-invalid', { reason: 'Invalid action token' });
+    logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Invalid action token' });
+    incrementMetric('action_invalid', { reason: 'invalid_token' });
+    const stats = invalidActionCounts.get(socket.id);
+    if (!stats || now - stats.lastAt > 5000) {
+      invalidActionCounts.set(socket.id, { count: 1, lastAt: now });
+    } else {
+      stats.count += 1;
+      stats.lastAt = now;
+      if (stats.count >= 3) {
+        console.warn(`⚠️ Repeated invalid actions from ${socket.id} (${stats.count} in 5s)`);
+        logEvent('invalid_action_spam', { roomId, playerId: socket.id, count: stats.count });
+        incrementMetric('invalid_action_spam');
+      }
+    }
+    return false;
+  }
+
+  if (now - expectedToken.issuedAt > ACTION_TOKEN_TTL_MS) {
+    actionTokens.delete(socket.id);
+    socket.emit('action-invalid', { reason: 'Action token expired' });
+    logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Action token expired' });
+    incrementMetric('action_invalid', { reason: 'token_expired' });
+    return false;
+  }
+
+  return true;
+}
+
+function validatePlayerActionRequest(
+  socket: any,
+  data: { type: ActionType; amount?: number; actionToken?: string }
+): { roomId: string; room: any; engine: GameEngine } | null {
+  const roomId = getRoomIdOrError(socket);
+  if (!roomId) return null;
+  const room = getRoomOrError(roomId, socket);
+  if (!room) return null;
+  const engine = getEngineOrError(roomId, socket);
+  if (!engine) return null;
+
+  if (roomActionInFlight.has(roomId)) {
+    socket.emit('action-invalid', { reason: 'Room is processing another action' });
+    return null;
+  }
+
+  if (room.gameState.isDrawPhase) {
+    socket.emit('action-invalid', { reason: 'Draw phase in progress' });
+    logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Draw phase in progress' });
+    incrementMetric('action_invalid', { reason: 'draw_phase' });
+    return null;
+  }
+
+  const now = Date.now();
+  if (!checkActionRateLimit(socket, roomId, now)) {
+    return null;
+  }
+  if (!validateActionToken(socket, roomId, data.actionToken, now)) {
+    return null;
+  }
+
+  if (actionInFlight.has(socket.id)) {
+    socket.emit('action-invalid', { reason: 'Action already in progress' });
+    return null;
+  }
+
+  return { roomId, room, engine };
+}
+
+function handleAllInRunout(roomId: string, room: any, io: Server) {
+  const runoutPhase = room.gameState.runoutPhase || 'PREFLOP';
+  const board = room.gameState.board;
+  const DELAY = 1500; // 1.5秒
+
+  console.log(`🎬 Starting all-in runout from ${runoutPhase}`);
+
+  io.to(`room:${roomId}`).emit('runout-started', {
+    runoutPhase,
+    fullBoard: board
+  });
+
+  const scheduleRunout = async () => {
+    if (runoutPhase === 'PREFLOP') {
+      await new Promise(r => setTimeout(r, DELAY));
+      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 3), phase: 'FLOP' });
+
+      await new Promise(r => setTimeout(r, DELAY));
+      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 4), phase: 'TURN' });
+
+      await new Promise(r => setTimeout(r, DELAY));
+      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
+
+    } else if (runoutPhase === 'FLOP') {
+      await new Promise(r => setTimeout(r, DELAY));
+      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 4), phase: 'TURN' });
+
+      await new Promise(r => setTimeout(r, DELAY));
+      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
+
+    } else if (runoutPhase === 'TURN') {
+      await new Promise(r => setTimeout(r, DELAY));
+      io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
+    }
+
+    await new Promise(r => setTimeout(r, DELAY));
+
+    const calculatedPots = potManager.calculatePots(room.players);
+    room.gameState.pot = calculatedPots;
+    console.log(`💰 Pots calculated: Main=${calculatedPots.main}, Sides=${calculatedPots.side.map(s => s.amount).join(',')}`);
+
+    const showdownResult = showdownManager.executeShowdown(room);
+    io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
+
+    if (showdownResult.winners.length > 0) {
+      for (const winner of showdownResult.winners) {
+        const bonus = metaGameManager.checkSevenDeuce(room, winner.playerId, winner.hand);
+        if (bonus) {
+          io.to(`room:${roomId}`).emit('seven-deuce-bonus', bonus);
+          console.log(`🎲 7-2 BONUS: ${winner.playerName} wins ${bonus.amount}`);
+        }
+      }
+    }
+
+    const rotation = rotationManager.checkRotation(room);
+    if (rotation.changed) {
+      console.log(`🔄 Next game: ${rotation.nextGame}`);
+      io.to(`room:${roomId}`).emit('next-game', {
+        nextGame: rotation.nextGame,
+        gamesList: room.rotation.gamesList
+      });
+    }
+
+    room.gameState.isRunout = false;
+    room.gameState.runoutPhase = undefined;
+    room.gameState.status = 'WAITING' as any;
+
+    broadcastRoomState(roomId, room, io);
+
+    setTimeout(() => {
+      if (cleanupPendingLeavers(roomId, io)) {
+        return;
+      }
+      scheduleNextHand(roomId, io);
+    }, 1500);
+  };
+
+  scheduleRunout();
+}
+
+function handleNormalShowdown(roomId: string, room: any, io: Server) {
+  let showdownResult;
+  const activePlayers = room.players.filter(p =>
+    p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
+  );
+
+  if (activePlayers.length === 1) {
+    showdownResult = showdownManager.awardToLastPlayer(room);
   } else {
-    gameEngines.delete(roomId);
-    roomActionInFlight.delete(roomId);
-    if (!leaveRoom) {
-      socket.leave(`room:${roomId}`);
+    const calculatedPots = potManager.calculatePots(room.players);
+    room.gameState.pot = calculatedPots;
+    console.log(`💰 Pots calculated: Main=${calculatedPots.main}, Sides=${calculatedPots.side.map(s => s.amount).join(',')}`);
+    showdownResult = showdownManager.executeShowdown(room);
+  }
+
+  io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
+
+  if (showdownResult.winners.length > 0) {
+    for (const winner of showdownResult.winners) {
+      const bonus = metaGameManager.checkSevenDeuce(room, winner.playerId, winner.hand);
+      if (bonus) {
+        io.to(`room:${roomId}`).emit('seven-deuce-bonus', bonus);
+        console.log(`🎲 7-2 BONUS: ${winner.playerName} wins ${bonus.amount}`);
+      }
     }
   }
 
-  io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+  const rotation = rotationManager.checkRotation(room);
+  if (rotation.changed) {
+    console.log(`🔄 Next game: ${rotation.nextGame}`);
+    io.to(`room:${roomId}`).emit('next-game', {
+      nextGame: rotation.nextGame,
+      gamesList: room.rotation.gamesList
+    });
+  }
+
+  room.gameState.status = 'WAITING' as any;
+
+  setTimeout(() => {
+    if (cleanupPendingLeavers(roomId, io)) {
+      return;
+    }
+    scheduleNextHand(roomId, io);
+  }, 1500);
+}
+
+function maybeHandleShowdown(roomId: string, room: any, io: Server): boolean {
+  if (room.gameState.status !== 'SHOWDOWN') {
+    return false;
+  }
+
+  const activePlayers = room.players.filter(p =>
+    p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
+  );
+
+  if (room.gameState.isRunout && activePlayers.length >= 2) {
+    handleAllInRunout(roomId, room, io);
+    return true;
+  }
+
+  handleNormalShowdown(roomId, room, io);
+  return false;
+}
+
+function validateDrawExchangeRequest(
+  socket: any,
+  data: { discardIndexes: number[] }
+): { roomId: string; room: any; engine: GameEngine; player: RoomPlayer; discardIndexes: number[] } | null {
+  const roomId = getRoomIdOrError(socket);
+  if (!roomId) return null;
+  const room = getRoomOrError(roomId, socket);
+  if (!room) return null;
+  const engine = getEngineOrError(roomId, socket);
+  if (!engine) return null;
+
+  const player = getDrawPlayer(room, socket);
+  if (!player) return null;
+
+  if (!validateDrawPhase(room, socket)) return null;
+  if (!validateDrawEligibility(player, socket)) return null;
+  if (!validateDrawNotCompleted(room, socket)) return null;
+
+  const variantConfig = getVariantConfig(room.gameState.gameVariant);
+  const maxDrawCount = variantConfig.maxDrawCount ?? player.hand?.length ?? 0;
+  const discardIndexes = parseDiscardIndexes(data, player, maxDrawCount, socket);
+  if (!discardIndexes) return null;
+
+  return { roomId, room, engine, player, discardIndexes };
+}
+
+function getDrawPlayer(room: any, socket: any): RoomPlayer | null {
+  const player = room.players.find((p: any) => p?.socketId === socket.id);
+  if (!player) {
+    socket.emit('error', { message: 'Player not found' });
+    return null;
+  }
+  return player;
+}
+
+function validateDrawPhase(room: any, socket: any): boolean {
+  const status = room.gameState.status;
+  const isDrawPhase = room.gameState.isDrawPhase;
+  if (!isDrawPhase || (status !== 'FIRST_DRAW' && status !== 'SECOND_DRAW' && status !== 'THIRD_DRAW')) {
+    socket.emit('error', { message: 'Not in draw exchange phase' });
+    return false;
+  }
+  return true;
+}
+
+function validateDrawEligibility(player: RoomPlayer, socket: any): boolean {
+  if (player.status !== 'ACTIVE' && player.status !== 'ALL_IN') {
+    socket.emit('error', { message: 'You cannot draw' });
+    return false;
+  }
+  return true;
+}
+
+function validateDrawNotCompleted(room: any, socket: any): boolean {
+  const completedDraw = room.gameState.playersCompletedDraw || [];
+  if (completedDraw.includes(socket.id)) {
+    socket.emit('error', { message: 'You have already drawn this round' });
+    return false;
+  }
+  return true;
+}
+
+function parseDiscardIndexes(
+  data: { discardIndexes: number[] },
+  player: RoomPlayer,
+  maxDrawCount: number,
+  socket: any
+): number[] | null {
+  const discardIndexes = Array.isArray(data.discardIndexes) ? data.discardIndexes : [];
+  const uniqueIndexes = new Set<number>();
+  for (const idx of discardIndexes) {
+    if (!Number.isInteger(idx)) {
+      socket.emit('error', { message: 'Invalid discard index' });
+      return null;
+    }
+    uniqueIndexes.add(idx);
+  }
+  if (discardIndexes.length !== uniqueIndexes.size) {
+    socket.emit('error', { message: 'Duplicate discard indexes' });
+    return null;
+  }
+  if (discardIndexes.length > maxDrawCount) {
+    socket.emit('error', { message: `Too many cards to discard (max ${maxDrawCount})` });
+    return null;
+  }
+  if (!player.hand || discardIndexes.some(idx => idx < 0 || idx >= player.hand.length)) {
+    socket.emit('error', { message: 'Discard index out of range' });
+    return null;
+  }
+  return discardIndexes;
+}
+
+function validateQuickJoinBuyIn(room: any, buyIn: number, socket: any): boolean {
+  const minBuyIn = room.config.buyInMin || room.config.bigBlind * 20;
+  const maxBuyIn = room.config.buyInMax || room.config.bigBlind * 100;
+  if (buyIn < minBuyIn || buyIn > maxBuyIn) {
+    socket.emit('error', { message: `Buy-in must be between ${minBuyIn} and ${maxBuyIn}` });
+    return false;
+  }
+  return true;
+}
+
+function removeExistingPlayerSession(room: any, socket: any, user: any, roomId: string) {
+  const existingPlayerIndex = room.players.findIndex(p => {
+    if (!p) return false;
+    if (p.socketId === socket.id) return true;
+    if (user?.userId && p.userId === user.userId) return true;
+    return false;
+  });
+
+  if (existingPlayerIndex === -1) return;
+
+  const oldPlayer = room.players[existingPlayerIndex]!;
+  console.log(`🔄 Removing old session for ${oldPlayer.name} (old: ${oldPlayer.socketId}, new: ${socket.id})`);
+
+  if (room.gameState.status !== 'WAITING') {
+    const engine = gameEngines.get(roomId);
+    if (engine && room.activePlayerIndex === existingPlayerIndex && oldPlayer.status === 'ACTIVE') {
+      engine.processAction(room, {
+        playerId: oldPlayer.socketId,
+        type: 'FOLD' as ActionType,
+        timestamp: Date.now()
+      });
+    }
+  }
+
+  room.players[existingPlayerIndex] = null;
+}
+
+function createQuickJoinPlayer(socket: any, user: any, room: any, buyIn: number): RoomPlayer {
+  const variantConfig = getVariantConfig(room.gameState.gameVariant);
+  const isWaiting = room.gameState.status === 'WAITING';
+  return {
+    socketId: socket.id,
+    name: user?.displayName || 'Guest',
+    stack: buyIn,
+    bet: 0,
+    totalBet: 0,
+    status: (isWaiting ? 'ACTIVE' : 'SIT_OUT') as PlayerStatus,
+    hand: null,
+    pendingJoin: !isWaiting,
+    waitingForBB: !isWaiting && variantConfig.hasButton,
+    disconnected: false,
+    userId: user?.userId,
+    avatarIcon: user?.avatarIcon
+  };
 }
 
 const app = express();
@@ -739,10 +1178,7 @@ io.on('connection', (socket) => {
       }
 
       // バイイン額チェック
-      const minBuyIn = room.config.buyInMin || room.config.bigBlind * 20;
-      const maxBuyIn = room.config.buyInMax || room.config.bigBlind * 100;
-      if (data.buyIn < minBuyIn || data.buyIn > maxBuyIn) {
-        socket.emit('error', { message: `Buy-in must be between ${minBuyIn} and ${maxBuyIn}` });
+      if (!validateQuickJoinBuyIn(room, data.buyIn, socket)) {
         return;
       }
 
@@ -750,34 +1186,7 @@ io.on('connection', (socket) => {
       const user = socket.data?.user;
       const playerName = user?.displayName || 'Guest';
 
-      // 既に着席済みかチェック（socket.idまたはuserId）
-      const existingPlayerIndex = room.players.findIndex(p => {
-        if (!p) return false;
-        if (p.socketId === socket.id) return true;
-        if (user?.userId && p.userId === user.userId) return true;
-        return false;
-      });
-
-      if (existingPlayerIndex !== -1) {
-        // 既存プレイヤーを削除（古いセッション）
-        const oldPlayer = room.players[existingPlayerIndex]!;
-        console.log(`🔄 Removing old session for ${oldPlayer.name} (old: ${oldPlayer.socketId}, new: ${socket.id})`);
-
-        // ハンド中の場合はフォールド処理
-        if (room.gameState.status !== 'WAITING') {
-          const engine = gameEngines.get(data.roomId);
-          if (engine && room.activePlayerIndex === existingPlayerIndex && oldPlayer.status === 'ACTIVE') {
-            engine.processAction(room, {
-              playerId: oldPlayer.socketId,
-              type: 'FOLD' as ActionType,
-              timestamp: Date.now()
-            });
-          }
-        }
-
-        // プレイヤーを削除
-        room.players[existingPlayerIndex] = null;
-      }
+      removeExistingPlayerSession(room, socket, user, data.roomId);
 
       // 空席を探す
       const seatIndex = findRandomEmptySeat(room.players);
@@ -795,24 +1204,7 @@ io.on('connection', (socket) => {
       // ロビーから離脱
       socket.leave('lobby');
 
-      const variantConfig = getVariantConfig(room.gameState.gameVariant);
-      const isWaiting = room.gameState.status === 'WAITING';
-
-      // プレイヤー情報を作成
-      const player: RoomPlayer = {
-        socketId: socket.id,
-        name: playerName,
-        stack: data.buyIn,
-        bet: 0,
-        totalBet: 0,
-        status: (isWaiting ? 'ACTIVE' : 'SIT_OUT') as PlayerStatus,
-        hand: null,
-        pendingJoin: !isWaiting,
-        waitingForBB: !isWaiting && variantConfig.hasButton,
-        disconnected: false,
-        userId: user?.userId,
-        avatarIcon: user?.avatarIcon
-      };
+      const player = createQuickJoinPlayer(socket, user, room, data.buyIn);
 
       roomManager.sitDown(data.roomId, seatIndex, player);
 
@@ -937,85 +1329,9 @@ io.on('connection', (socket) => {
   // プレイヤーアクション
   socket.on('player-action', (data: { type: ActionType; amount?: number; actionToken?: string }) => {
     try {
-      const roomId = getRoomIdFromSocket(socket);
-      if (!roomId) {
-        socket.emit('error', { message: 'You are not in any room' });
-        return;
-      }
-
-      const room = roomManager.getRoomById(roomId);
-      if (!room) {
-        socket.emit('error', { message: 'Room not found' });
-        return;
-      }
-
-      const engine = gameEngines.get(roomId);
-      if (!engine) {
-        socket.emit('error', { message: 'Game not started' });
-        return;
-      }
-
-      if (roomActionInFlight.has(roomId)) {
-        socket.emit('action-invalid', { reason: 'Room is processing another action' });
-        return;
-      }
-
-      if (room.gameState.isDrawPhase) {
-        socket.emit('action-invalid', { reason: 'Draw phase in progress' });
-        logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Draw phase in progress' });
-        incrementMetric('action_invalid', { reason: 'draw_phase' });
-        return;
-      }
-
-      const now = Date.now();
-      const rate = actionRateLimit.get(socket.id);
-      if (!rate || now - rate.windowStart > ACTION_RATE_LIMIT_WINDOW_MS) {
-        actionRateLimit.set(socket.id, { count: 1, windowStart: now });
-      } else {
-        rate.count += 1;
-        if (rate.count > ACTION_RATE_LIMIT_MAX) {
-          const ip = socket.handshake.address;
-          console.warn(`⚠️ Rate limit: ${socket.id} (${ip}) ${rate.count}/${ACTION_RATE_LIMIT_WINDOW_MS}ms`);
-          socket.emit('action-invalid', { reason: 'Too many actions' });
-          logEvent('rate_limited', { roomId, playerId: socket.id, ip, count: rate.count });
-          incrementMetric('rate_limited');
-          return;
-        }
-      }
-
-      const token = data.actionToken;
-      const expectedToken = actionTokens.get(socket.id);
-      if (!token || !expectedToken || token !== expectedToken.token) {
-        socket.emit('action-invalid', { reason: 'Invalid action token' });
-        logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Invalid action token' });
-        incrementMetric('action_invalid', { reason: 'invalid_token' });
-        const stats = invalidActionCounts.get(socket.id);
-        if (!stats || now - stats.lastAt > 5000) {
-          invalidActionCounts.set(socket.id, { count: 1, lastAt: now });
-        } else {
-          stats.count += 1;
-          stats.lastAt = now;
-          if (stats.count >= 3) {
-            console.warn(`⚠️ Repeated invalid actions from ${socket.id} (${stats.count} in 5s)`);
-            logEvent('invalid_action_spam', { roomId, playerId: socket.id, count: stats.count });
-            incrementMetric('invalid_action_spam');
-          }
-        }
-        return;
-      }
-
-      if (Date.now() - expectedToken.issuedAt > ACTION_TOKEN_TTL_MS) {
-        actionTokens.delete(socket.id);
-        socket.emit('action-invalid', { reason: 'Action token expired' });
-        logEvent('action_invalid', { roomId, playerId: socket.id, reason: 'Action token expired' });
-        incrementMetric('action_invalid', { reason: 'token_expired' });
-        return;
-      }
-
-      if (actionInFlight.has(socket.id)) {
-        socket.emit('action-invalid', { reason: 'Action already in progress' });
-        return;
-      }
+      const context = validatePlayerActionRequest(socket, data);
+      if (!context) return;
+      const { roomId, room, engine } = context;
 
       // タイマーをクリア
       clearPlayerTimer(socket.id);
@@ -1046,160 +1362,8 @@ io.on('connection', (socket) => {
       actionTokens.delete(socket.id);
 
       // ショーダウンチェック
-      if (room.gameState.status === 'SHOWDOWN') {
-        // アクティブなプレイヤーをチェック
-        const activePlayers = room.players.filter(p =>
-          p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN')
-        );
-
-        // オールインランアウトの場合、遅延表示
-        if (room.gameState.isRunout && activePlayers.length >= 2) {
-          const runoutPhase = room.gameState.runoutPhase || 'PREFLOP';
-          const board = room.gameState.board;
-          const DELAY = 1500; // 1.5秒
-
-          console.log(`🎬 Starting all-in runout from ${runoutPhase}`);
-
-          // ランアウト開始を通知
-          io.to(`room:${roomId}`).emit('runout-started', {
-            runoutPhase,
-            fullBoard: board
-          });
-
-          // フェーズに応じてボードを段階的に公開
-          const scheduleRunout = async () => {
-            if (runoutPhase === 'PREFLOP') {
-              // Flop (最初の3枚)
-              await new Promise(r => setTimeout(r, DELAY));
-              io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 3), phase: 'FLOP' });
-
-              // Turn (4枚目)
-              await new Promise(r => setTimeout(r, DELAY));
-              io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 4), phase: 'TURN' });
-
-              // River (5枚目)
-              await new Promise(r => setTimeout(r, DELAY));
-              io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
-
-            } else if (runoutPhase === 'FLOP') {
-              // Turn
-              await new Promise(r => setTimeout(r, DELAY));
-              io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 4), phase: 'TURN' });
-
-              // River
-              await new Promise(r => setTimeout(r, DELAY));
-              io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
-
-            } else if (runoutPhase === 'TURN') {
-              // River only
-              await new Promise(r => setTimeout(r, DELAY));
-              io.to(`room:${roomId}`).emit('runout-board', { board: board.slice(0, 5), phase: 'RIVER' });
-            }
-
-            // ショーダウン実行
-            await new Promise(r => setTimeout(r, DELAY));
-
-            // サイドポットを計算
-            const calculatedPots = potManager.calculatePots(room.players);
-            room.gameState.pot = calculatedPots;
-            console.log(`💰 Pots calculated: Main=${calculatedPots.main}, Sides=${calculatedPots.side.map(s => s.amount).join(',')}`);
-
-            // ショーダウン実行
-            const showdownResult = showdownManager.executeShowdown(room);
-            io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
-
-            // 7-2ゲームボーナスチェック
-            if (showdownResult.winners.length > 0) {
-              for (const winner of showdownResult.winners) {
-                const bonus = metaGameManager.checkSevenDeuce(room, winner.playerId, winner.hand);
-                if (bonus) {
-                  io.to(`room:${roomId}`).emit('seven-deuce-bonus', bonus);
-                  console.log(`🎲 7-2 BONUS: ${winner.playerName} wins ${bonus.amount}`);
-                }
-              }
-            }
-
-            // ローテーションチェック
-            const rotation = rotationManager.checkRotation(room);
-            if (rotation.changed) {
-              console.log(`🔄 Next game: ${rotation.nextGame}`);
-              io.to(`room:${roomId}`).emit('next-game', {
-                nextGame: rotation.nextGame,
-                gamesList: room.rotation.gamesList
-              });
-            }
-
-            // ランアウトフラグをクリア
-            room.gameState.isRunout = false;
-            room.gameState.runoutPhase = undefined;
-            room.gameState.status = 'WAITING' as any;
-
-            broadcastRoomState(roomId, room, io);
-
-            // ショーダウン後の遅延（1.5秒）
-            setTimeout(() => {
-              if (cleanupPendingLeavers(roomId, io)) {
-                return;
-              }
-              // 次のハンドを自動開始
-              scheduleNextHand(roomId, io);
-            }, 1500);
-          };
-
-          // 非同期でランアウトを実行
-          scheduleRunout();
-          return; // 通常のフローをスキップ
-
-        } else {
-          // 通常のショーダウン（ランアウトなし）
-          let showdownResult;
-          if (activePlayers.length === 1) {
-            // 1人しか残っていない（他全員フォールド）
-            showdownResult = showdownManager.awardToLastPlayer(room);
-          } else {
-            // サイドポットを計算
-            const calculatedPots = potManager.calculatePots(room.players);
-            room.gameState.pot = calculatedPots;
-            console.log(`💰 Pots calculated: Main=${calculatedPots.main}, Sides=${calculatedPots.side.map(s => s.amount).join(',')}`);
-
-            // ショーダウン実行
-            showdownResult = showdownManager.executeShowdown(room);
-          }
-
-          io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
-
-          // 7-2ゲームボーナスチェック
-          if (showdownResult.winners.length > 0) {
-            for (const winner of showdownResult.winners) {
-              const bonus = metaGameManager.checkSevenDeuce(room, winner.playerId, winner.hand);
-              if (bonus) {
-                io.to(`room:${roomId}`).emit('seven-deuce-bonus', bonus);
-                console.log(`🎲 7-2 BONUS: ${winner.playerName} wins ${bonus.amount}`);
-              }
-            }
-          }
-
-          // ローテーションチェック
-          const rotation = rotationManager.checkRotation(room);
-          if (rotation.changed) {
-            console.log(`🔄 Next game: ${rotation.nextGame}`);
-            io.to(`room:${roomId}`).emit('next-game', {
-              nextGame: rotation.nextGame,
-              gamesList: room.rotation.gamesList
-            });
-          }
-
-          room.gameState.status = 'WAITING' as any;
-
-          // ショーダウン後の遅延（1.5秒）
-          setTimeout(() => {
-            if (cleanupPendingLeavers(roomId, io)) {
-              return;
-            }
-            // 次のハンドを自動開始
-            scheduleNextHand(roomId, io);
-          }, 1500);
-        }
+      if (maybeHandleShowdown(roomId, room, io)) {
+        return;
       }
 
       // 全員に更新を送信
@@ -1221,75 +1385,9 @@ io.on('connection', (socket) => {
   // ドロー交換（2-7 Triple Draw, Badugi用）
   socket.on('draw-exchange', (data: { discardIndexes: number[] }) => {
     try {
-      const roomId = getRoomIdFromSocket(socket);
-      if (!roomId) {
-        socket.emit('error', { message: 'You are not in any room' });
-        return;
-      }
-
-      const room = roomManager.getRoomById(roomId);
-      if (!room) {
-        socket.emit('error', { message: 'Room not found' });
-        return;
-      }
-
-      const engine = gameEngines.get(roomId);
-      if (!engine) {
-        socket.emit('error', { message: 'Game not started' });
-        return;
-      }
-
-      // プレイヤーを確認
-      const player = room.players.find(p => p?.socketId === socket.id);
-      if (!player) {
-        socket.emit('error', { message: 'Player not found' });
-        return;
-      }
-
-      // Drawフェーズか確認（交換フェーズでなければエラー）
-      const status = room.gameState.status;
-      const isDrawPhase = room.gameState.isDrawPhase;
-      if (!isDrawPhase || (status !== 'FIRST_DRAW' && status !== 'SECOND_DRAW' && status !== 'THIRD_DRAW')) {
-        socket.emit('error', { message: 'Not in draw exchange phase' });
-        return;
-      }
-
-      // プレイヤーがアクティブか確認
-      if (player.status !== 'ACTIVE' && player.status !== 'ALL_IN') {
-        socket.emit('error', { message: 'You cannot draw' });
-        return;
-      }
-
-      // 既に交換済みか確認
-      const completedDraw = room.gameState.playersCompletedDraw || [];
-      if (completedDraw.includes(socket.id)) {
-        socket.emit('error', { message: 'You have already drawn this round' });
-        return;
-      }
-
-      const variantConfig = getVariantConfig(room.gameState.gameVariant);
-      const maxDrawCount = variantConfig.maxDrawCount ?? player.hand?.length ?? 0;
-      const discardIndexes = Array.isArray(data.discardIndexes) ? data.discardIndexes : [];
-      const uniqueIndexes = new Set<number>();
-      for (const idx of discardIndexes) {
-        if (!Number.isInteger(idx)) {
-          socket.emit('error', { message: 'Invalid discard index' });
-          return;
-        }
-        uniqueIndexes.add(idx);
-      }
-      if (discardIndexes.length !== uniqueIndexes.size) {
-        socket.emit('error', { message: 'Duplicate discard indexes' });
-        return;
-      }
-      if (discardIndexes.length > maxDrawCount) {
-        socket.emit('error', { message: `Too many cards to discard (max ${maxDrawCount})` });
-        return;
-      }
-      if (!player.hand || discardIndexes.some(idx => idx < 0 || idx >= player.hand!.length)) {
-        socket.emit('error', { message: 'Discard index out of range' });
-        return;
-      }
+      const context = validateDrawExchangeRequest(socket, data);
+      if (!context) return;
+      const { roomId, room, engine, player, discardIndexes } = context;
 
       // カード交換を実行
       const deck = engine.getDeck();
@@ -1639,11 +1737,54 @@ io.on('connection', (socket) => {
   });
 });
 
+// Phase 2: ヘルパー関数をエクスポート（テスト用）
+export {
+  getRoomIdOrError,
+  getRoomOrError,
+  getEngineOrError,
+  checkActionRateLimit,
+  validateActionToken,
+  validatePlayerActionRequest,
+  handleAllInRunout,
+  handleNormalShowdown,
+  maybeHandleShowdown,
+  validateDrawExchangeRequest,
+  validateQuickJoinBuyIn,
+  removeExistingPlayerSession,
+  createQuickJoinPlayer,
+  getRoomIdFromSocket,
+  broadcastRoomState,
+  cleanupPendingLeavers,
+  scheduleNextHand
+};
+
+// テスト用: 状態にアクセスするヘルパー関数
+export const __testing__ = {
+  getGameEngine: (roomId: string) => gameEngines.get(roomId),
+  setGameEngine: (roomId: string, engine: GameEngine) => gameEngines.set(roomId, engine),
+  getActionToken: (socketId: string) => actionTokens.get(socketId),
+  setActionToken: (socketId: string, token: string, issuedAt: number) =>
+    actionTokens.set(socketId, { token, issuedAt }),
+  getActionRateLimit: (socketId: string) => actionRateLimit.get(socketId),
+  setActionRateLimit: (socketId: string, count: number, windowStart: number) =>
+    actionRateLimit.set(socketId, { count, windowStart }),
+  clearActionTokens: () => actionTokens.clear(),
+  clearActionRateLimit: () => actionRateLimit.clear(),
+  clearInvalidActionCounts: () => invalidActionCounts.clear(),
+  ACTION_TOKEN_TTL_MS,
+  ACTION_RATE_LIMIT_WINDOW_MS,
+  ACTION_RATE_LIMIT_MAX
+};
+
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
-httpServer.listen(Number(PORT), HOST, () => {
-  console.log(`\n🚀 Server is running on http://${HOST}:${PORT}`);
 
-  // プリセットルームを初期化
-  roomManager.initializePresetRooms();
-});
+// テスト環境では httpServer.listen() をスキップ（EPERM エラー回避）
+if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+  httpServer.listen(Number(PORT), HOST, () => {
+    console.log(`\n🚀 Server is running on http://${HOST}:${PORT}`);
+
+    // プリセットルームを初期化
+    roomManager.initializePresetRooms();
+  });
+}

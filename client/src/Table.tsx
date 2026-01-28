@@ -9,9 +9,14 @@ import { Socket } from 'socket.io-client';
 import { PokerTable } from './components/table/PokerTable';
 import { ActionPanel } from './components/action/ActionPanel';
 import { Card } from './components/cards/Card';
-import { GameLog, createActionLog, createEventLog } from './components/log/GameLog';
+import { GameLog } from './components/log/GameLog';
 import type { LogEntry } from './components/log/GameLog';
 import { evaluateHandRank } from './handEvaluator';
+import { useTableSocketEvents } from './hooks/useTableSocketEvents';
+import { useTurnTimer } from './hooks/useTurnTimer';
+import { useDrawPhaseState } from './hooks/useDrawPhaseState';
+import { useLeaveRoomOnUnmount } from './hooks/useLeaveRoomOnUnmount';
+import { useSyncYourHand } from './hooks/useSyncYourHand';
 import type {
   Player,
   GameState,
@@ -101,204 +106,28 @@ export function Table({
     setGameLogs(prev => [...prev.slice(-49), entry]); // 最大50件保持
   }, []);
 
-  // Socket.io イベントハンドリング
-  useEffect(() => {
-    if (!socket) return;
+  useTableSocketEvents({
+    socket,
+    maxTimerSeconds,
+    addLog,
+    setRoom,
+    setYourHand,
+    setShowdownResult,
+    setIsYourTurn,
+    setValidActions,
+    setCurrentBetInfo,
+    setActionToken,
+    setTimerSeconds,
+    setTimeBankChips,
+    setHasDrawnThisRound,
+    setSelectedDrawCards,
+    setIsRunout,
+  });
 
-    socket.on('room-state-update', (updatedRoom: Room) => {
-      setRoom(updatedRoom);
-    });
-
-    socket.on('room-joined', (data: { room: Room }) => {
-      setRoom(data.room);
-    });
-
-    socket.on('game-started', (data: { room: Room; yourHand: string[] }) => {
-      setRoom(data.room);
-      setYourHand(data.yourHand || []);
-      setShowdownResult(null);
-    });
-
-    socket.on('your-turn', (data: {
-      validActions: ActionType[];
-      currentBet: number;
-      minRaise: number;
-      maxBet?: number;
-      betStructure?: 'no-limit' | 'pot-limit' | 'fixed';
-      isCapped?: boolean;
-      raisesRemaining?: number;
-      fixedBetSize?: number;
-      actionToken?: string;
-    }) => {
-      setIsYourTurn(true);
-      setValidActions(data.validActions);
-      setCurrentBetInfo({
-        currentBet: data.currentBet,
-        minRaise: data.minRaise,
-        maxBet: data.maxBet || 10000,
-        betStructure: data.betStructure || 'no-limit',
-        isCapped: data.isCapped || false,
-        raisesRemaining: data.raisesRemaining ?? 4,
-        fixedBetSize: data.fixedBetSize,
-      });
-      setActionToken(data.actionToken || null);
-      setTimerSeconds(maxTimerSeconds);
-    });
-
-    socket.on('timer-update', (data: { seconds: number }) => {
-      setTimerSeconds(data.seconds);
-    });
-
-    socket.on('timebank-update', (data: { chips: number }) => {
-      setTimeBankChips(data.chips);
-    });
-
-    socket.on('showdown-result', (result: ShowdownResult) => {
-      setShowdownResult(result);
-      setYourHand([]);
-      setIsYourTurn(false);
-      result.winners.forEach(w => {
-        addLog(createEventLog(
-          'win',
-          `${w.playerName} wins ${w.amount.toLocaleString()} (${w.handRank})`,
-          w.hand && w.hand.length > 0 ? w.hand : undefined
-        ));
-      });
-    });
-
-    socket.on('action-invalid', (data: { reason: string }) => {
-      if (data.reason === 'Not your turn') {
-        return;
-      }
-      if (data.reason === 'Invalid action token' || data.reason === 'Action token expired' || data.reason === 'Room is processing another action') {
-        socket.emit('request-room-state');
-      }
-      console.warn(`Invalid action: ${data.reason}`);
-      addLog(createEventLog('info', `Invalid action: ${data.reason}`));
-    });
-
-    socket.on('sit-down-success', (data: { seatIndex: number }) => {
-      console.log(`Seated at ${data.seatIndex}`);
-    });
-
-    socket.on('rebuy-success', (data: { amount: number; newStack: number }) => {
-      addLog(createEventLog('info', `Added ${data.amount} chips (total: ${data.newStack})`));
-    });
-
-    socket.on('draw-complete', (data: { newHand: string[] }) => {
-      setYourHand(data.newHand);
-      setHasDrawnThisRound(true);
-      setSelectedDrawCards([]);
-    });
-
-    socket.on('player-drew', (data: { playerId: string; playerName: string; cardCount: number }) => {
-      addLog(createEventLog('info', `${data.playerName} drew ${data.cardCount} cards`));
-    });
-
-    socket.on('runout-started', (_data: { runoutPhase: string; fullBoard: string[] }) => {
-      setIsRunout(true);
-      addLog(createEventLog('info', 'All-in runout...'));
-    });
-
-    socket.on('runout-board', (data: { board: string[]; phase: string }) => {
-      setRoom(prev => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          gameState: {
-            ...prev.gameState,
-            board: data.board,
-          }
-        };
-      });
-      if (data.phase === 'FLOP') {
-        addLog(createEventLog('flop', data.board.slice(0, 3).join(' ')));
-      } else if (data.phase === 'TURN') {
-        addLog(createEventLog('turn', data.board[3]));
-      } else if (data.phase === 'RIVER') {
-        addLog(createEventLog('river', data.board[4]));
-        setTimeout(() => setIsRunout(false), 500);
-      }
-    });
-
-    return () => {
-      // イベントリスナーをクリーンアップ
-      socket.off('room-state-update');
-      socket.off('room-joined');
-      socket.off('game-started');
-      socket.off('your-turn');
-      socket.off('showdown-result');
-      socket.off('action-invalid');
-      socket.off('sit-down-success');
-      socket.off('rebuy-success');
-      socket.off('draw-complete');
-      socket.off('player-drew');
-      socket.off('runout-started');
-      socket.off('runout-board');
-      socket.off('timer-update');
-      socket.off('timebank-update');
-    };
-  }, [socket, actionToken]);
-
-  // コンポーネントアンマウント時のみルームから退出
-  useEffect(() => {
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.emit('leave-room');
-      }
-    };
-  }, []); // 空の依存配列 = マウント/アンマウント時のみ実行
-
-  // タイマーカウントダウン
-  useEffect(() => {
-    if (!isYourTurn || timerSeconds === undefined) return;
-
-    const interval = setInterval(() => {
-      setTimerSeconds(prev => {
-        if (prev === undefined || prev <= 0) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [isYourTurn, timerSeconds !== undefined]);
-
-  useEffect(() => {
-    if (timerSeconds === 0 && isYourTurn) {
-      setTimerSeconds(undefined);
-    }
-  }, [timerSeconds, isYourTurn]);
-
-  // ドローフェーズ検出
-  useEffect(() => {
-    if (!room) return;
-
-    const gameState = room.gameState as any;
-    const isInDrawPhase = gameState.isDrawPhase === true;
-
-    if (isInDrawPhase && !isDrawPhase) {
-      setIsDrawPhase(true);
-      setHasDrawnThisRound(false);
-      setSelectedDrawCards([]);
-    } else if (!isInDrawPhase && isDrawPhase) {
-      setIsDrawPhase(false);
-      setHasDrawnThisRound(false);
-      setSelectedDrawCards([]);
-    }
-  }, [room?.gameState]);
-
-  useEffect(() => {
-    if (!room) return;
-    const seatIndex = room.players.findIndex(p => p?.socketId === yourSocketId);
-    if (seatIndex === -1) return;
-    const player = room.players[seatIndex];
-    if (player?.hand && player.hand.length > 0 && yourHand.length === 0) {
-      setYourHand(player.hand);
-    }
-  }, [room, yourSocketId, yourHand.length]);
+  useLeaveRoomOnUnmount(socketRef);
+  useTurnTimer(isYourTurn, timerSeconds, setTimerSeconds);
+  useDrawPhaseState(room, isDrawPhase, setIsDrawPhase, setHasDrawnThisRound, setSelectedDrawCards);
+  useSyncYourHand(room, yourSocketId, yourHand.length, setYourHand);
 
   // アクション実行
   const handleAction = useCallback((type: ActionType, amount?: number) => {

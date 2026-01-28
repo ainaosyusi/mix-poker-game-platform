@@ -89,10 +89,38 @@
 
 ---
 
+## Cyclomatic Complexity Findings (Snapshot)
+
+**Summary**
+- Total functions: 880
+- Average complexity: 2.78
+
+**Top Functions (highest complexity)**
+1. `client/src/components/player/PlayerSeat.tsx:103` — PlayerSeat (53)
+2. `client/src/components/action/ActionPanel.tsx:17` — ActionPanel (52)
+3. `client/src/Table.tsx:50` — Table (35)
+4. `server/GameEngine.ts:150` — processAction (31)
+5. `server/index.ts:938` — socket handler (30)
+
+**Files with Highest Max Complexity**
+- `client/src/components/player/PlayerSeat.tsx` (max 53, avg 7.2)
+- `client/src/components/action/ActionPanel.tsx` (max 52, avg 5.9)
+- `client/src/Table.tsx` (max 35, avg 2.6)
+- `server/GameEngine.ts` (max 31, avg 5.0)
+- `server/index.ts` (max 30, avg 4.3)
+
+**Refactor Focus (first pass)**
+1. Split `PlayerSeat` into subcomponents (UI vs data formatting).
+2. Extract `ActionPanel` decision logic into a pure function (testable).
+3. Break `Table` into state hooks + render components.
+4. Isolate `processAction()` into smaller steps (validate → apply → advance).
+5. Move socket event handlers into a module per feature (room/game/meta).
+
+---
+
 ## Next Actions (Suggested Order)
 
 1) Create a test-only room creation endpoint or local factory (unblocks flaky integration tests).
 2) Extract session store (socketId/userId/roomId) and use it in join/leave/disconnect.
 3) Add unit tests for `GameEngine` + `ShowdownManager` edge cases.
 4) Introduce test hooks to skip timers / force start.
-
