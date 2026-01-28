@@ -86,9 +86,6 @@ export function Table({
   const [selectedDrawCards, setSelectedDrawCards] = useState<number[]>([]);
   const [hasDrawnThisRound, setHasDrawnThisRound] = useState(false);
 
-  // ランアウト(オールイン)用state
-  const [isRunout, setIsRunout] = useState(false);
-
   // タイマー関連state
   const [timerSeconds, setTimerSeconds] = useState<number | undefined>(undefined);
   const [timeBankChips, setTimeBankChips] = useState(5);
@@ -121,7 +118,6 @@ export function Table({
     setTimeBankChips,
     setHasDrawnThisRound,
     setSelectedDrawCards,
-    setIsRunout,
   });
 
   useLeaveRoomOnUnmount(socketRef);
@@ -246,7 +242,6 @@ export function Table({
         activePlayerIndex={room.activePlayerIndex}
         yourSocketId={yourSocketId}
         showdownResult={showdownResult}
-        isRunout={isRunout}
         yourHand={yourHand}
         timerSeconds={timerSeconds}
         maxTimerSeconds={maxTimerSeconds}

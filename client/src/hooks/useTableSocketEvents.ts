@@ -39,7 +39,6 @@ interface TableSocketOptions {
   setTimeBankChips: Dispatch<SetStateAction<number>>;
   setHasDrawnThisRound: (value: boolean) => void;
   setSelectedDrawCards: (indexes: number[]) => void;
-  setIsRunout: (value: boolean) => void;
 }
 
 export function useTableSocketEvents({
@@ -57,7 +56,6 @@ export function useTableSocketEvents({
   setTimeBankChips,
   setHasDrawnThisRound,
   setSelectedDrawCards,
-  setIsRunout,
 }: TableSocketOptions) {
   useEffect(() => {
     if (!socket) return;
@@ -147,7 +145,6 @@ export function useTableSocketEvents({
     };
 
     const handleRunoutStarted = (_data: { runoutPhase: string; fullBoard: string[] }) => {
-      setIsRunout(true);
       addLog(createEventLog('info', 'All-in runout...'));
     };
 
@@ -168,7 +165,6 @@ export function useTableSocketEvents({
         addLog(createEventLog('turn', data.board[3]));
       } else if (data.phase === 'RIVER') {
         addLog(createEventLog('river', data.board[4]));
-        setTimeout(() => setIsRunout(false), 500);
       }
     };
 
@@ -218,6 +214,5 @@ export function useTableSocketEvents({
     setTimeBankChips,
     setHasDrawnThisRound,
     setSelectedDrawCards,
-    setIsRunout,
   ]);
 }

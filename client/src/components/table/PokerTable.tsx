@@ -19,7 +19,6 @@ interface PokerTableProps {
   activePlayerIndex: number;
   yourSocketId: string;
   showdownResult?: ShowdownResult | null;
-  isRunout?: boolean;
   yourHand?: string[] | null;
   timerSeconds?: number;
   maxTimerSeconds?: number;
@@ -33,7 +32,6 @@ export const PokerTable = memo(function PokerTable({
   activePlayerIndex,
   yourSocketId,
   showdownResult,
-  isRunout = false,
   yourHand,
   timerSeconds,
   maxTimerSeconds = 30,
