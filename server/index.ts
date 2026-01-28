@@ -736,11 +736,11 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
       const showdownResult = showdownManager.executeShowdown(room);
 
       console.log(`🏆 Showdown complete. Winners: ${showdownResult.winners.map(w => w.playerName).join(', ')}`);
-      if (showdownResult.chipDistribution && showdownResult.chipDistribution.length > 0) {
+      if (showdownResult.winners && showdownResult.winners.length > 0) {
         console.log(`💰 Chip distribution:`);
-        showdownResult.chipDistribution.forEach((dist: any) => {
-          const player = room.players.find((p: any) => p?.socketId === dist.playerId);
-          console.log(`   ${player?.name || dist.playerId}: +${dist.amount} (new stack: ${player?.stack || '?'})`);
+        showdownResult.winners.forEach((winner: any) => {
+          const player = room.players.find((p: any) => p?.socketId === winner.playerId);
+          console.log(`   ${winner.playerName}: +${winner.amount} (new stack: ${player?.stack || '?'})`);
         });
       }
 
