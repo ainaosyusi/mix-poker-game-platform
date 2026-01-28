@@ -294,14 +294,26 @@ function scheduleNextHand(roomId: string, io: Server) {
   if (!room) return;
 
   // WAITING状態でなければ何もしない
-  if (room.gameState.status !== 'WAITING') return;
+  if (room.gameState.status !== 'WAITING') {
+    console.log(`⚠️  scheduleNextHand: room status is ${room.gameState.status}, not WAITING`);
+    return;
+  }
 
   // ACTIVEプレイヤー数を確認（pendingJoinやSIT_OUT、スタック0は除く）
   const activePlayers = room.players.filter(p =>
     p !== null && p.stack > 0 && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
   );
 
-  if (activePlayers.length < 2) return;
+  console.log(`🎲 scheduleNextHand: ${activePlayers.length} active players found`);
+  if (activePlayers.length < 2) {
+    console.log('⚠️  scheduleNextHand: not enough players (< 2)');
+    room.players.forEach((p, i) => {
+      if (p) {
+        console.log(`  [${i}] ${p.name}: stack=${p.stack}, status=${p.status}, flags={pendingJoin:${p.pendingJoin}, pendingSitOut:${p.pendingSitOut}, pendingLeave:${p.pendingLeave}}`);
+      }
+    });
+    return;
+  }
 
   const timeout = setTimeout(() => {
     pendingStarts.delete(roomId);
@@ -705,10 +717,19 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
     room.gameState.runoutPhase = undefined;
     room.gameState.status = 'WAITING' as any;
 
+    console.log('🔄 After all-in showdown, player states:');
+    room.players.forEach((p, i) => {
+      if (p) {
+        console.log(`  [${i}] ${p.name}: stack=${p.stack}, status=${p.status}, pendingLeave=${p.pendingLeave}`);
+      }
+    });
+
     broadcastRoomState(roomId, room, io);
 
     setTimeout(() => {
+      console.log('⏱️  Attempting to schedule next hand after all-in...');
       if (cleanupPendingLeavers(roomId, io)) {
+        console.log('⚠️  cleanupPendingLeavers returned true, stopping game');
         return;
       }
       scheduleNextHand(roomId, io);

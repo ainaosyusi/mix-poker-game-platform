@@ -85,7 +85,6 @@ export const PokerTable = memo(function PokerTable({
         padding: '16px',
         paddingBottom: '80px',
         minHeight: '55vh',
-        animation: isRunout ? 'pulse 2s infinite' : undefined,
       }}
     >
       {/* 背景グラデーション */}

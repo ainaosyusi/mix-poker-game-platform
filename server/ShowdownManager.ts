@@ -904,6 +904,8 @@ export class ShowdownManager {
 
         // メインポットの分配
         if (room.gameState.pot.main > 0) {
+            console.log(`💰 Main pot: ${room.gameState.pot.main}, ${allEvaluations.length} eligible players`);
+
             // 全員の中から最強のハンドを見つける
             let bestEval = allEvaluations[0];
             for (const e of allEvaluations) {
@@ -917,12 +919,15 @@ export class ShowdownManager {
                 compareFunc(e.bestFive, bestEval.bestFive) === 0
             );
 
+            console.log(`🏆 Main pot winners: ${mainWinners.map(w => `${w.player.name} (${w.handRank})`).join(', ')}`);
+
             const share = Math.floor(room.gameState.pot.main / mainWinners.length);
             const remainder = room.gameState.pot.main % mainWinners.length;
 
             mainWinners.forEach((w, i) => {
                 const amount = share + (i < remainder ? 1 : 0);
                 w.player.stack += amount;
+                console.log(`  → ${w.player.name} wins +${amount} from main pot`);
 
                 winnersMap.set(w.player.socketId, {
                     player: w.player,
@@ -937,10 +942,17 @@ export class ShowdownManager {
         for (const sidePot of room.gameState.pot.side) {
             if (sidePot.amount <= 0) continue;
 
+            console.log(`💰 Side pot: ${sidePot.amount}, eligible players: ${sidePot.eligiblePlayers.join(', ')}`);
+
             // このサイドポットに参加資格のあるプレイヤーの評価のみ
             const eligibleEvaluations = allEvaluations.filter(e =>
                 sidePot.eligiblePlayers.includes(e.player.socketId)
             );
+
+            console.log(`  → ${eligibleEvaluations.length} eligible evaluations`);
+            eligibleEvaluations.forEach(e => {
+                console.log(`     ${e.player.name}: ${e.handRank}`);
+            });
 
             if (eligibleEvaluations.length === 0) continue;
 
@@ -957,16 +969,20 @@ export class ShowdownManager {
                 compareFunc(e.bestFive, bestEval.bestFive) === 0
             );
 
+            console.log(`🏆 Side pot winners: ${sideWinners.map(w => `${w.player.name} (${w.handRank})`).join(', ')}`);
+
             const share = Math.floor(sidePot.amount / sideWinners.length);
             const remainder = sidePot.amount % sideWinners.length;
 
             sideWinners.forEach((w, i) => {
                 const amount = share + (i < remainder ? 1 : 0);
                 w.player.stack += amount;
+                console.log(`  → ${w.player.name} wins +${amount} from side pot`);
 
                 const existing = winnersMap.get(w.player.socketId);
                 if (existing) {
                     existing.amount += amount;
+                    console.log(`     (total now: +${existing.amount})`);
                 } else {
                     winnersMap.set(w.player.socketId, {
                         player: w.player,

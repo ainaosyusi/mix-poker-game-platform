@@ -25,6 +25,10 @@ export class PotManager {
             p.totalBet > 0
         ) as Player[];
 
+        console.log('💰 PotManager.calculatePots:');
+        console.log(`  Contributors: ${allContributors.map(p => `${p.name}(${p.totalBet})`).join(', ')}`);
+        console.log(`  Eligible (not folded): ${eligiblePlayers.map(p => `${p.name}(${p.totalBet})`).join(', ')}`);
+
         if (allContributors.length === 0) {
             return { main: 0, side: [] };
         }
