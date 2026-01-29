@@ -26,6 +26,9 @@ export class GameEngine {
      * @returns 成功時true
      */
     startHand(room: Room): boolean {
+        // まずプレイヤーのステータスをリセット（FOLDED→ACTIVE等）
+        this.resetPlayersForNewHand(room);
+
         // アクティブプレイヤー数をチェック
         const activePlayers = this.getSeatedPlayers(room);
         if (activePlayers.length < 2) {
@@ -38,7 +41,6 @@ export class GameEngine {
         // ハンド番号を増加
         room.gameState.handNumber = (room.gameState.handNumber || 0) + 1;
 
-        this.resetPlayersForNewHand(room);
         this.resetHandState(room);
         this.deck = this.dealer.createDeck();
 

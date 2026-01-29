@@ -191,9 +191,27 @@ function handleTimerTimeout(roomId: string, playerId: string, io: Server) {
     timestamp: Date.now()
   });
 
-  if (result.success) {
-    // ショーダウンチェック等の処理は player-action と同様に行う
-    processPostAction(roomId, room, engine, io);
+  if (!result.success) {
+    console.error(`❌ Auto-action failed for ${player.name}: ${result.error}`);
+    broadcastRoomState(roomId, room, io);
+    return;
+  }
+
+  // player-actionハンドラーと同じフローを使用
+  // 1. 全員に更新を送信
+  broadcastRoomState(roomId, room, io);
+
+  // 2. ショーダウンチェック
+  if (maybeHandleShowdown(roomId, room, io)) {
+    return;
+  }
+
+  // 3. 次のアクティブプレイヤーに行動を促す
+  if (room.activePlayerIndex !== -1) {
+    const nextPlayer = room.players[room.activePlayerIndex];
+    if (nextPlayer) {
+      emitYourTurn(roomId, room, engine, io, nextPlayer);
+    }
   }
 }
 
@@ -895,6 +913,9 @@ function handleNormalShowdown(roomId: string, room: any, io: Server) {
       console.log(`  [${i}] ${p.name}: stack=${p.stack}, status=${p.status}, pendingLeave=${p.pendingLeave}`);
     }
   });
+
+  // クライアントに最終状態を送信
+  broadcastRoomState(roomId, room, io);
 
   setTimeout(() => {
     if (cleanupPendingLeavers(roomId, io)) {
