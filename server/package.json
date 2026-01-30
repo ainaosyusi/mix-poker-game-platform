@@ -25,7 +25,7 @@
   "description": "",
   "scripts": {
     "dev": "tsx watch index.ts",
-    "build": "prisma generate && prisma migrate deploy && tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:watch": "vitest"
