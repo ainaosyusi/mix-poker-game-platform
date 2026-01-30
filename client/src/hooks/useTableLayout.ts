@@ -4,12 +4,17 @@
 // ========================================
 
 import { useMemo, useState, useEffect, type RefObject } from 'react';
-import { SEAT_POSITIONS_6, SEAT_POSITIONS_8 } from '../constants/seatPositions';
+import {
+  SEAT_POSITIONS_6, SEAT_POSITIONS_8,
+  SEAT_POSITIONS_6_PORTRAIT, SEAT_POSITIONS_8_PORTRAIT,
+} from '../constants/seatPositions';
 import type { SeatPosition, AbsoluteSeatPosition } from '../types/table';
+import type { Orientation } from './useOrientation';
 
 interface UseTableLayoutOptions {
   maxPlayers: 6 | 8;
   containerRef: RefObject<HTMLDivElement | null>;
+  orientation?: Orientation;
 }
 
 interface TableDimensions {
@@ -17,7 +22,14 @@ interface TableDimensions {
   height: number;
 }
 
-export function useTableLayout({ maxPlayers, containerRef }: UseTableLayoutOptions) {
+function getPositions(maxPlayers: 6 | 8, orientation: Orientation): SeatPosition[] {
+  if (orientation === 'portrait') {
+    return maxPlayers === 6 ? SEAT_POSITIONS_6_PORTRAIT : SEAT_POSITIONS_8_PORTRAIT;
+  }
+  return maxPlayers === 6 ? SEAT_POSITIONS_6 : SEAT_POSITIONS_8;
+}
+
+export function useTableLayout({ maxPlayers, containerRef, orientation = 'landscape' }: UseTableLayoutOptions) {
   const [dimensions, setDimensions] = useState<TableDimensions>({ width: 0, height: 0 });
 
   // ResizeObserverでテーブルサイズを監視
@@ -39,7 +51,7 @@ export function useTableLayout({ maxPlayers, containerRef }: UseTableLayoutOptio
 
   // 座席位置を計算
   const seatPositions = useMemo((): AbsoluteSeatPosition[] => {
-    const basePositions: SeatPosition[] = maxPlayers === 6 ? SEAT_POSITIONS_6 : SEAT_POSITIONS_8;
+    const basePositions = getPositions(maxPlayers, orientation);
     const { width, height } = dimensions;
 
     if (width === 0 || height === 0) {
@@ -60,7 +72,7 @@ export function useTableLayout({ maxPlayers, containerRef }: UseTableLayoutOptio
       betAbsoluteX: width / 2 + ((pos.x + pos.betOffset.x) / 100) * width,
       betAbsoluteY: height / 2 + ((pos.y + pos.betOffset.y) / 100) * height,
     }));
-  }, [maxPlayers, dimensions]);
+  }, [maxPlayers, dimensions, orientation]);
 
   // CSS位置スタイルを生成
   const getSeatStyle = (index: number): React.CSSProperties => {
@@ -101,21 +113,21 @@ export function useTableLayout({ maxPlayers, containerRef }: UseTableLayoutOptio
 }
 
 // ポット位置を計算（コミュニティカードの下）
-export function getPotPosition(): React.CSSProperties {
+export function getPotPosition(orientation: Orientation = 'landscape'): React.CSSProperties {
   return {
     position: 'absolute',
     left: '50%',
-    top: '58%',
+    top: orientation === 'portrait' ? '52%' : '58%',
     transform: 'translate(-50%, -50%)',
   };
 }
 
 // コミュニティカード位置を計算（テーブル中央上部）
-export function getCommunityCardsPosition(): React.CSSProperties {
+export function getCommunityCardsPosition(orientation: Orientation = 'landscape'): React.CSSProperties {
   return {
     position: 'absolute',
     left: '50%',
-    top: '35%',
+    top: orientation === 'portrait' ? '38%' : '35%',
     transform: 'translate(-50%, -50%)',
   };
 }

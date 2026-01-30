@@ -5,6 +5,7 @@
 
 import { memo, useRef, useEffect, useState } from 'react';
 import type { Player } from '../../types/table';
+import type { Orientation } from '../../hooks/useOrientation';
 import { Card } from '../cards/Card';
 import { ChipStack } from '../chips/ChipStack';
 
@@ -25,8 +26,9 @@ interface PlayerSeatProps {
   holeCards?: string[] | null;
   timerSeconds?: number;
   maxTimerSeconds?: number;
-  handRank?: string; // 役名（自分のハンド用）
-  highlightCards?: string[]; // ハイライトするカード（役判定に使われたカード）
+  handRank?: string;
+  highlightCards?: string[];
+  orientation?: Orientation;
 }
 
 // チップ位置を座席に応じて計算（テーブル中央寄りに配置）
@@ -100,6 +102,58 @@ function getStudUpCardsPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSS
   }
 }
 
+// ポートレート用チップ位置（テーブル中心方向にオフセット縮小）
+function getChipPositionPortrait(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
+  if (maxPlayers === 6) {
+    switch (seatIndex) {
+      case 0: return { bottom: '100%', marginBottom: 30, left: '50%', transform: 'translateX(-50%)' };
+      case 1: return { bottom: '70%', right: '-50%' };
+      case 2: return { top: '70%', right: '-50%' };
+      case 3: return { top: '100%', marginTop: 30, left: '50%', transform: 'translateX(-50%)' };
+      case 4: return { top: '70%', left: '-50%' };
+      case 5: return { bottom: '70%', left: '-50%' };
+      default: return { top: '100%', marginTop: 30 };
+    }
+  }
+  switch (seatIndex) {
+    case 0: return { bottom: '100%', marginBottom: 30, left: '50%', transform: 'translateX(-50%)' };
+    case 1: return { bottom: '60%', right: '-45%' };
+    case 2: return { top: '50%', right: '-50%', transform: 'translateY(-50%)' };
+    case 3: return { top: '60%', right: '-45%' };
+    case 4: return { top: '100%', marginTop: 30, left: '50%', transform: 'translateX(-50%)' };
+    case 5: return { top: '60%', left: '-45%' };
+    case 6: return { top: '50%', left: '-50%', transform: 'translateY(-50%)' };
+    case 7: return { bottom: '60%', left: '-45%' };
+    default: return { top: '100%', marginTop: 30 };
+  }
+}
+
+// ポートレート用ディーラーボタン位置
+function getDealerButtonPositionPortrait(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
+  if (maxPlayers === 6) {
+    switch (seatIndex) {
+      case 0: return { bottom: '100%', marginBottom: 10, left: '20%' };
+      case 1: return { bottom: '50%', right: '-25%' };
+      case 2: return { top: '50%', right: '-25%' };
+      case 3: return { top: '100%', marginTop: 10, left: '20%' };
+      case 4: return { top: '50%', left: '-25%' };
+      case 5: return { bottom: '50%', left: '-25%' };
+      default: return { top: '100%', marginTop: 10 };
+    }
+  }
+  switch (seatIndex) {
+    case 0: return { bottom: '100%', marginBottom: 10, left: '20%' };
+    case 1: return { bottom: '35%', right: '-25%' };
+    case 2: return { top: '20%', right: '-30%' };
+    case 3: return { top: '35%', right: '-25%' };
+    case 4: return { top: '100%', marginTop: 10, left: '20%' };
+    case 5: return { top: '35%', left: '-25%' };
+    case 6: return { top: '20%', left: '-30%' };
+    case 7: return { bottom: '35%', left: '-25%' };
+    default: return { top: '100%', marginTop: 10 };
+  }
+}
+
 // ディーラーボタン位置を座席に応じて計算（チップと重ならない位置）
 function getDealerButtonPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
@@ -145,7 +199,11 @@ export const PlayerSeat = memo(function PlayerSeat({
   maxTimerSeconds = 30,
   handRank,
   highlightCards = [],
+  orientation = 'landscape',
 }: PlayerSeatProps) {
+  const isPortrait = orientation === 'portrait';
+  // ポートレート時、自分のカードはmediumサイズ
+  const cardSize: 'tiny' | 'small' | 'medium' | 'large' = isPortrait && isYou ? 'medium' : 'small';
   const isFolded = player?.status === 'FOLDED';
   const isAllIn = player?.status === 'ALL_IN';
 
@@ -267,10 +325,14 @@ export const PlayerSeat = memo(function PlayerSeat({
     : 100;
 
   // チップ位置
-  const chipPosition = getChipPosition(seatIndex, maxPlayers);
+  const chipPosition = isPortrait
+    ? getChipPositionPortrait(seatIndex, maxPlayers)
+    : getChipPosition(seatIndex, maxPlayers);
 
   // ディーラーボタン位置
-  const dealerBtnPosition = getDealerButtonPosition(seatIndex, maxPlayers);
+  const dealerBtnPosition = isPortrait
+    ? getDealerButtonPositionPortrait(seatIndex, maxPlayers)
+    : getDealerButtonPosition(seatIndex, maxPlayers);
 
   return (
     <div
@@ -316,7 +378,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            bottom: isDrawGame ? '65%' : '55%',
+            bottom: isDrawGame ? '68%' : '58%',
             display: 'flex',
             gap: isDrawGame ? -6 : -8,
             zIndex: 10,
@@ -339,7 +401,7 @@ export const PlayerSeat = memo(function PlayerSeat({
                   filter: isHighlighted ? 'drop-shadow(0 0 12px rgba(34, 197, 94, 0.9))' : undefined,
                 }}
               >
-                <Card card={card} size="small" />
+                <Card card={card} size={cardSize} />
               </div>
             );
             })
@@ -356,7 +418,7 @@ export const PlayerSeat = memo(function PlayerSeat({
                   animation: cardDealAnimate ? `cardDealIn 0.4s ease-out ${i * 0.1}s both` : undefined,
                 }}
               >
-                <Card card="" size="small" faceDown />
+                <Card card="" size={cardSize} faceDown />
               </div>
             ))
           )}
@@ -368,7 +430,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            bottom: '55%',
+            bottom: '58%',
             display: 'flex',
             gap: -8,
             zIndex: 10,
@@ -383,7 +445,7 @@ export const PlayerSeat = memo(function PlayerSeat({
                 zIndex: i,
               }}
             >
-              <Card card={card} size="small" />
+              <Card card={card} size={cardSize} />
             </div>
           ))}
         </div>
@@ -394,7 +456,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            bottom: '55%',
+            bottom: '58%',
             display: 'flex',
             gap: -8,
             zIndex: 10,
@@ -408,7 +470,7 @@ export const PlayerSeat = memo(function PlayerSeat({
                 zIndex: i,
               }}
             >
-              <Card card="" size="small" faceDown />
+              <Card card="" size={cardSize} faceDown />
             </div>
           ))}
         </div>
@@ -427,7 +489,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         >
           {player.studUpCards.map((card, i) => (
             <div key={i} style={{ zIndex: i }}>
-              <Card card={card} size="small" />
+              <Card card={card} size={cardSize} />
             </div>
           ))}
         </div>

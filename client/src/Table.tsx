@@ -16,6 +16,7 @@ import { useTableSocketEvents } from './hooks/useTableSocketEvents';
 import { useTurnTimer } from './hooks/useTurnTimer';
 import { useDrawPhaseState } from './hooks/useDrawPhaseState';
 import { useLeaveRoomOnUnmount } from './hooks/useLeaveRoomOnUnmount';
+import { useOrientation } from './hooks/useOrientation';
 import { useSyncYourHand } from './hooks/useSyncYourHand';
 import type {
   Player,
@@ -124,6 +125,8 @@ export function Table({
   useTurnTimer(isYourTurn, timerSeconds, setTimerSeconds);
   useDrawPhaseState(room, isDrawPhase, setIsDrawPhase, setHasDrawnThisRound, setSelectedDrawCards);
   useSyncYourHand(room, yourSocketId, yourHand.length, setYourHand);
+  const orientation = useOrientation();
+  const isPortrait = orientation === 'portrait';
 
   // アクション実行
   const handleAction = useCallback((type: ActionType, amount?: number) => {
@@ -328,7 +331,7 @@ export function Table({
         <div
           style={{
             position: 'fixed',
-            bottom: 140,
+            bottom: isPortrait ? 200 : 140,
             left: '50%',
             transform: 'translateX(-50%)',
             background: 'rgba(0, 0, 0, 0.85)',

@@ -5,6 +5,7 @@
 
 import { memo, useRef, useState, useEffect } from 'react';
 import { useTableLayout, getCommunityCardsPosition, getPotPosition } from '../../hooks/useTableLayout';
+import { useOrientation } from '../../hooks/useOrientation';
 import { PlayerSeat } from '../player/PlayerSeat';
 import { CommunityCards } from '../cards/Card';
 import { PotDisplay } from './PotDisplay';
@@ -37,9 +38,13 @@ export const PokerTable = memo(function PokerTable({
   maxTimerSeconds = 30,
 }: PokerTableProps) {
   const tableRef = useRef<HTMLDivElement>(null);
+  const orientation = useOrientation();
+  const isPortrait = orientation === 'portrait';
+
   const { getSeatStyle } = useTableLayout({
     maxPlayers,
     containerRef: tableRef,
+    orientation,
   });
 
   // カードアニメーション用state
@@ -80,9 +85,9 @@ export const PokerTable = memo(function PokerTable({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '16px',
-        paddingBottom: '80px',
-        minHeight: '55vh',
+        padding: isPortrait ? '8px' : '16px',
+        paddingBottom: isPortrait ? '40px' : '80px',
+        minHeight: isPortrait ? '60vh' : '55vh',
       }}
     >
       {/* 背景グラデーション */}
@@ -102,9 +107,9 @@ export const PokerTable = memo(function PokerTable({
         style={{
           position: 'relative',
           width: '100%',
-          maxWidth: 1000,
-          maxHeight: '65vh',
-          aspectRatio: '2.1 / 1',
+          maxWidth: isPortrait ? 430 : 1000,
+          maxHeight: isPortrait ? '70vh' : '65vh',
+          aspectRatio: isPortrait ? '1 / 1.5' : '2.1 / 1',
         }}
       >
         {/* テーブル本体（楕円） */}
@@ -113,7 +118,7 @@ export const PokerTable = memo(function PokerTable({
             position: 'absolute',
             inset: 0,
             borderRadius: '50%',
-            border: '16px solid #1a1a1a',
+            border: isPortrait ? '10px solid #1a1a1a' : '16px solid #1a1a1a',
             boxShadow: '0 0 50px rgba(0,0,0,0.8)',
             background: '#0d3f4a',
           }}
@@ -157,7 +162,7 @@ export const PokerTable = memo(function PokerTable({
             <span
               style={{
                 color: '#ffffff',
-                fontSize: 32,
+                fontSize: isPortrait ? 20 : 32,
                 fontWeight: 'bold',
                 letterSpacing: '0.1em',
               }}
@@ -172,15 +177,16 @@ export const PokerTable = memo(function PokerTable({
           <PotDisplay
             mainPot={displayPot}
             sidePots={gameState.pot.side}
-            style={getPotPosition()}
+            style={getPotPosition(orientation)}
           />
         )}
 
         {/* コミュニティカード */}
-        <div style={getCommunityCardsPosition()}>
+        <div style={getCommunityCardsPosition(orientation)}>
           <CommunityCards
             cards={gameState.board}
             animate={animateCards}
+            size={isPortrait ? 'small' : 'medium'}
             highlightCards={showdownResult?.winners[0]?.qualifyingBoardCards || []}
           />
         </div>
@@ -224,6 +230,7 @@ export const PokerTable = memo(function PokerTable({
               maxTimerSeconds={maxTimerSeconds}
               handRank={handRank}
               highlightCards={winnerData?.qualifyingHoleCards || []}
+              orientation={orientation}
             />
           );
         })}

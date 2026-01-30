@@ -44,6 +44,44 @@ export const SEAT_POSITIONS_8: SeatPosition[] = [
   { x: 35, y: 46, angle: -20, betOffset: { x: -18, y: -14 } },
 ];
 
+// 6人テーブル縦向きレイアウト（ポートレート）
+// x範囲を狭く（-38〜+38）、y範囲を広く（-55〜+55）
+// 縦画面ではカード回転なし（angle=0）
+export const SEAT_POSITIONS_6_PORTRAIT: SeatPosition[] = [
+  // 0: 下中央（自分）
+  { x: 0, y: 55, angle: 0, betOffset: { x: 0, y: -22 } },
+  // 1: 左下
+  { x: -38, y: 28, angle: 0, betOffset: { x: 18, y: -10 } },
+  // 2: 左上
+  { x: -38, y: -28, angle: 0, betOffset: { x: 18, y: 10 } },
+  // 3: 上中央
+  { x: 0, y: -55, angle: 0, betOffset: { x: 0, y: 22 } },
+  // 4: 右上
+  { x: 38, y: -28, angle: 0, betOffset: { x: -18, y: 10 } },
+  // 5: 右下
+  { x: 38, y: 28, angle: 0, betOffset: { x: -18, y: -10 } },
+];
+
+// 8人テーブル縦向きレイアウト（ポートレート）
+export const SEAT_POSITIONS_8_PORTRAIT: SeatPosition[] = [
+  // 0: 下中央
+  { x: 0, y: 55, angle: 0, betOffset: { x: 0, y: -22 } },
+  // 1: 左下
+  { x: -34, y: 38, angle: 0, betOffset: { x: 16, y: -10 } },
+  // 2: 左
+  { x: -42, y: 5, angle: 0, betOffset: { x: 18, y: 0 } },
+  // 3: 左上
+  { x: -34, y: -30, angle: 0, betOffset: { x: 16, y: 10 } },
+  // 4: 上中央
+  { x: 0, y: -55, angle: 0, betOffset: { x: 0, y: 22 } },
+  // 5: 右上
+  { x: 34, y: -30, angle: 0, betOffset: { x: -16, y: 10 } },
+  // 6: 右
+  { x: 42, y: 5, angle: 0, betOffset: { x: -18, y: 0 } },
+  // 7: 右下
+  { x: 34, y: 38, angle: 0, betOffset: { x: -16, y: -10 } },
+];
+
 // チップカラー定義
 export const CHIP_COLORS = {
   white: { value: 1, color: '#ffffff', stripe: '#e0e0e0' },

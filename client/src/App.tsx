@@ -6,6 +6,7 @@ import type { AuthUser } from './screens/AuthScreen';
 import { MainMenu } from './screens/MainMenu';
 import { RoomSelect } from './screens/RoomSelect';
 import { hasToken, apiGet, setToken, clearToken } from './api';
+import { CardPreferencesProvider } from './contexts/CardPreferencesContext';
 
 type ViewType = 'auth' | 'mainMenu' | 'roomSelect' | 'table';
 
@@ -126,39 +127,37 @@ function App() {
     connectSocket(user.token);
   }
 
-  // メインメニュー
-  if (currentView === 'mainMenu' && user) {
-    return (
-      <MainMenu
-        user={user}
-        onNavigate={(view) => setCurrentView(view)}
-        onLogout={handleLogout}
-        onUserUpdate={handleUserUpdate}
-      />
-    );
-  }
-
-  // ルーム選択
-  if (currentView === 'roomSelect') {
-    return (
-      <RoomSelect
-        socket={socketRef.current}
-        onJoinRoom={handleJoinRoom}
-        onBack={() => setCurrentView('mainMenu')}
-      />
-    );
-  }
-
-  // テーブル画面
+  // CardPreferencesProviderで認証後の全画面をラップ
   return (
-    <Table
-      socket={socketRef.current}
-      roomId={currentRoomId || ''}
-      initialRoomData={initialRoomData}
-      initialHand={initialHand}
-      yourSocketId={myId}
-      onLeaveRoom={handleLeaveRoom}
-    />
+    <CardPreferencesProvider>
+      {currentView === 'mainMenu' && user && (
+        <MainMenu
+          user={user}
+          onNavigate={(view) => setCurrentView(view)}
+          onLogout={handleLogout}
+          onUserUpdate={handleUserUpdate}
+        />
+      )}
+
+      {currentView === 'roomSelect' && (
+        <RoomSelect
+          socket={socketRef.current}
+          onJoinRoom={handleJoinRoom}
+          onBack={() => setCurrentView('mainMenu')}
+        />
+      )}
+
+      {currentView === 'table' && (
+        <Table
+          socket={socketRef.current}
+          roomId={currentRoomId || ''}
+          initialRoomData={initialRoomData}
+          initialHand={initialHand}
+          yourSocketId={myId}
+          onLeaveRoom={handleLeaveRoom}
+        />
+      )}
+    </CardPreferencesProvider>
   );
 }
 

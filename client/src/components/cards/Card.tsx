@@ -1,28 +1,69 @@
 // ========================================
 // Mix Poker - Card Component
-// リアルカジノ風カードデザイン
+// プロポーカーアプリ風カードデザイン
 // ========================================
 
 import { memo, useRef, useEffect } from 'react';
 import type { CardProps } from '../../types/table';
-
-// スートの設定
-const SUITS: Record<string, { symbol: string; color: string }> = {
-  '♠': { symbol: '♠', color: '#1e293b' },
-  '♥': { symbol: '♥', color: '#ef4444' },
-  '♦': { symbol: '♦', color: '#ef4444' },
-  '♣': { symbol: '♣', color: '#1e293b' },
-  's': { symbol: '♠', color: '#1e293b' },
-  'h': { symbol: '♥', color: '#ef4444' },
-  'd': { symbol: '♦', color: '#ef4444' },
-  'c': { symbol: '♣', color: '#1e293b' },
-};
+import { useCardPreferencesContext } from '../../contexts/CardPreferencesContext';
 
 // ランクの表示変換
 const getRankDisplay = (rank: string): string => {
   if (rank === 'T') return '10';
   return rank;
 };
+
+// 絵札（J, Q, K）判定
+const isFaceCard = (rank: string): boolean => rank === 'J' || rank === 'Q' || rank === 'K';
+
+// 絵札の中央イラスト（SVGベース）
+function FaceCardIllustration({ rank, color, size }: { rank: string; color: string; size: number }) {
+  const s = Math.round(size * 0.65);
+  if (rank === 'J') {
+    // ジャック: 騎士の横顔
+    return (
+      <svg width={s} height={s} viewBox="0 0 40 40" fill="none">
+        <circle cx="20" cy="14" r="8" fill={color} opacity="0.25" />
+        <path d="M14 14c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke={color} strokeWidth="1.5" fill="none" opacity="0.6" />
+        <ellipse cx="20" cy="13" rx="5" ry="6" fill={color} opacity="0.2" />
+        <path d="M15 22c0 0 2-2 5-2s5 2 5 2v6c0 2-2 4-5 4s-5-2-5-4v-6z" fill={color} opacity="0.2" />
+        <path d="M17 10l-3-4M23 10l3-4" stroke={color} strokeWidth="1.2" opacity="0.4" />
+        <circle cx="18" cy="12" r="1" fill={color} opacity="0.5" />
+        <path d="M16 16q4 2 8 0" stroke={color} strokeWidth="0.8" opacity="0.4" />
+      </svg>
+    );
+  }
+  if (rank === 'Q') {
+    // クイーン: 王冠付き横顔
+    return (
+      <svg width={s} height={s} viewBox="0 0 40 40" fill="none">
+        <ellipse cx="20" cy="16" rx="6" ry="7" fill={color} opacity="0.2" />
+        <path d="M12 8l4 5 4-4 4 4 4-5" stroke={color} strokeWidth="1.5" opacity="0.5" fill="none" />
+        <path d="M12 8h16" stroke={color} strokeWidth="1" opacity="0.3" />
+        <circle cx="12" cy="7" r="1.5" fill={color} opacity="0.35" />
+        <circle cx="20" cy="5" r="1.5" fill={color} opacity="0.35" />
+        <circle cx="28" cy="7" r="1.5" fill={color} opacity="0.35" />
+        <circle cx="18" cy="14" r="1" fill={color} opacity="0.5" />
+        <path d="M17 19q3 2 6 0" stroke={color} strokeWidth="0.8" opacity="0.4" />
+        <path d="M14 24c0 0 2-2 6-2s6 2 6 2v5c0 2-3 4-6 4s-6-2-6-4v-5z" fill={color} opacity="0.15" />
+      </svg>
+    );
+  }
+  // K: キング
+  return (
+    <svg width={s} height={s} viewBox="0 0 40 40" fill="none">
+      <ellipse cx="20" cy="16" rx="6" ry="7" fill={color} opacity="0.2" />
+      <rect x="13" y="5" width="14" height="6" rx="1" fill={color} opacity="0.15" />
+      <path d="M13 11h14M15 5v6M25 5v6M20 3v8" stroke={color} strokeWidth="1" opacity="0.35" />
+      <path d="M16 5l4-3 4 3" stroke={color} strokeWidth="1.5" fill="none" opacity="0.5" />
+      <circle cx="20" cy="2" r="1.5" fill={color} opacity="0.4" />
+      <circle cx="18" cy="14" r="1" fill={color} opacity="0.5" />
+      <path d="M17 19q3 1.5 6 0" stroke={color} strokeWidth="0.8" opacity="0.4" />
+      <path d="M14 24c0 0 2-2 6-2s6 2 6 2v5c0 2-3 4-6 4s-6-2-6-4v-5z" fill={color} opacity="0.15" />
+      <path d="M13 26h14" stroke={color} strokeWidth="1" opacity="0.2" />
+    </svg>
+  );
+}
 
 // カードをパース
 function parseCard(card: string): { rank: string; suit: string } {
@@ -35,12 +76,21 @@ function parseCard(card: string): { rank: string; suit: string } {
   return { rank: card[0], suit: card.slice(1) };
 }
 
-// サイズの設定
-const CARD_SIZES: Record<string, { width: number; height: number; rankSize: number; centerSize: number }> = {
-  tiny: { width: 28, height: 40, rankSize: 10, centerSize: 14 },
-  small: { width: 40, height: 56, rankSize: 12, centerSize: 18 },
-  medium: { width: 56, height: 80, rankSize: 14, centerSize: 24 },
-  large: { width: 70, height: 100, rankSize: 16, centerSize: 30 },
+// サイズの設定（拡大 + フォントサイズ大幅増）
+const CARD_SIZES: Record<string, {
+  width: number; height: number;
+  rankSize: number; cornerSuitSize: number; centerSize: number;
+  padding: number; borderRadius: number;
+}> = {
+  tiny:   { width: 32,  height: 46,  rankSize: 13, cornerSuitSize: 9,  centerSize: 18, padding: 3, borderRadius: 5 },
+  small:  { width: 44,  height: 62,  rankSize: 16, cornerSuitSize: 11, centerSize: 24, padding: 4, borderRadius: 6 },
+  medium: { width: 60,  height: 84,  rankSize: 20, cornerSuitSize: 14, centerSize: 32, padding: 5, borderRadius: 7 },
+  large:  { width: 74,  height: 104, rankSize: 24, cornerSuitSize: 16, centerSize: 40, padding: 6, borderRadius: 8 },
+};
+
+// カードサイズに応じたオーバーラップ量
+const OVERLAP: Record<string, number> = {
+  tiny: -6, small: -10, medium: -12, large: -14,
 };
 
 export const Card = memo(function Card({
@@ -49,95 +99,119 @@ export const Card = memo(function Card({
   size = 'medium',
   faceDown = false
 }: CardProps) {
-  const sizeConfig = CARD_SIZES[size] || CARD_SIZES.medium;
+  const { suitConfig } = useCardPreferencesContext();
+  const s = CARD_SIZES[size] || CARD_SIZES.medium;
 
   // カード裏面
   if (faceDown) {
     return (
-      <div
-        style={{
-          width: sizeConfig.width,
-          height: sizeConfig.height,
-          background: 'linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%)',
-          borderRadius: 6,
-          border: '1px solid #991b1b',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            position: 'absolute',
-            inset: 3,
-            border: '1px solid rgba(255,255,255,0.1)',
-            borderRadius: 4,
-          }}
-        />
+      <div style={{
+        width: s.width, height: s.height,
+        background: 'linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%)',
+        borderRadius: s.borderRadius,
+        border: '1.5px solid #991b1b',
+        boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          position: 'absolute', inset: 3,
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: s.borderRadius - 2,
+        }} />
+        <div style={{
+          position: 'absolute', inset: 0,
+          backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.03) 4px, rgba(255,255,255,0.03) 8px)',
+        }} />
       </div>
     );
   }
 
   const { rank, suit } = parseCard(card);
-  const suitConfig = SUITS[suit] || SUITS['♠'];
+  const sc = suitConfig[suit] || suitConfig['s'];
+  const rankDisplay = getRankDisplay(rank);
 
   return (
-    <div
-      style={{
-        width: sizeConfig.width,
-        height: sizeConfig.height,
-        background: 'linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%)',
-        borderRadius: 6,
-        border: '1px solid #d1d5db',
-        boxShadow: '0 4px 8px rgba(0,0,0,0.2)',
+    <div style={{
+      width: s.width, height: s.height,
+      background: `linear-gradient(145deg, #ffffff 0%, ${sc.bg.replace('0.08', '0.15')} 100%)`,
+      borderRadius: s.borderRadius,
+      border: `1.5px solid ${sc.color}30`,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.8)',
+      position: 'relative',
+      userSelect: 'none',
+      overflow: 'hidden',
+      transition: animate ? 'transform 0.2s' : undefined,
+    }}>
+      {/* 左上コーナー: ランク + スート縦積み */}
+      <div style={{
+        position: 'absolute',
+        top: s.padding,
+        left: s.padding + 1,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: 4,
-        position: 'relative',
-        userSelect: 'none',
-        transition: animate ? 'transform 0.2s' : undefined,
-      }}
-    >
-      {/* 左上 */}
-      <div
-        style={{
-          fontSize: sizeConfig.rankSize,
-          fontWeight: 'bold',
-          color: suitConfig.color,
-          alignSelf: 'flex-start',
-          lineHeight: 1,
-        }}
-      >
-        {getRankDisplay(rank)}
+        lineHeight: 1,
+      }}>
+        <span style={{
+          fontSize: s.rankSize,
+          fontWeight: 800,
+          color: sc.color,
+          textShadow: '0 1px 1px rgba(0,0,0,0.08)',
+        }}>
+          {rankDisplay}
+        </span>
+        <span style={{
+          fontSize: s.cornerSuitSize,
+          color: sc.color,
+          marginTop: -1,
+        }}>
+          {sc.symbol}
+        </span>
       </div>
 
-      {/* 中央 */}
-      <div
-        style={{
-          fontSize: sizeConfig.centerSize,
-          color: suitConfig.color,
-        }}
-      >
-        {suitConfig.symbol}
+      {/* 中央: 絵札はイラスト、その他はスートウォーターマーク */}
+      <div style={{
+        position: 'absolute',
+        top: '50%', left: '50%',
+        transform: 'translate(-50%, -50%)',
+        pointerEvents: 'none',
+      }}>
+        {isFaceCard(rank) ? (
+          <FaceCardIllustration rank={rank} color={sc.color} size={s.centerSize * 1.8} />
+        ) : (
+          <div style={{ fontSize: s.centerSize, color: sc.color, opacity: 0.15 }}>
+            {sc.symbol}
+          </div>
+        )}
       </div>
 
-      {/* 右下 */}
-      <div
-        style={{
-          fontSize: sizeConfig.rankSize,
-          fontWeight: 'bold',
-          color: suitConfig.color,
-          alignSelf: 'flex-end',
-          transform: 'rotate(180deg)',
-          lineHeight: 1,
-        }}
-      >
-        {getRankDisplay(rank)}
+      {/* 右下コーナー: ランク + スート縦積み（反転） */}
+      <div style={{
+        position: 'absolute',
+        bottom: s.padding,
+        right: s.padding + 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        lineHeight: 1,
+        transform: 'rotate(180deg)',
+      }}>
+        <span style={{
+          fontSize: s.rankSize,
+          fontWeight: 800,
+          color: sc.color,
+          textShadow: '0 1px 1px rgba(0,0,0,0.08)',
+        }}>
+          {rankDisplay}
+        </span>
+        <span style={{
+          fontSize: s.cornerSuitSize,
+          color: sc.color,
+          marginTop: -1,
+        }}>
+          {sc.symbol}
+        </span>
       </div>
     </div>
   );
@@ -155,14 +229,15 @@ export const HoleCards = memo(function HoleCards({
   animate = false,
   size = 'medium'
 }: HoleCardsProps) {
+  const overlap = OVERLAP[size] || -10;
   return (
-    <div style={{ display: 'flex', gap: -8, alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       {cards.map((card, index) => (
         <div
           key={`${card}-${index}`}
           style={{
             transform: index === 0 ? 'rotate(-6deg)' : 'rotate(6deg)',
-            marginLeft: index > 0 ? -8 : 0,
+            marginLeft: index > 0 ? overlap : 0,
             zIndex: index,
           }}
         >
@@ -177,32 +252,30 @@ export const HoleCards = memo(function HoleCards({
 interface CommunityCardsProps {
   cards: string[];
   animate?: boolean;
-  highlightIndices?: number[]; // ハイライトするカードのインデックス（ショーダウン用）
-  highlightCards?: string[];   // ハイライトするカード（役判定に使われたカード）
+  size?: 'tiny' | 'small' | 'medium' | 'large';
+  highlightIndices?: number[];
+  highlightCards?: string[];
 }
 
 export const CommunityCards = memo(function CommunityCards({
   cards,
   animate = false,
+  size = 'medium',
   highlightIndices = [],
   highlightCards = [],
 }: CommunityCardsProps) {
-  // 前回のカード枚数を追跡
   const prevCountRef = useRef(0);
+  const cardSize = CARD_SIZES[size] || CARD_SIZES.medium;
 
-  // highlightCardsをインデックスに変換
   const highlightIndicesFromCards = highlightCards
     .map(cardStr => cards.indexOf(cardStr))
     .filter(idx => idx !== -1);
   const allHighlightIndices = [...highlightIndices, ...highlightIndicesFromCards];
 
-  // 新しく追加されたカードのインデックス
   const newCardsStartIndex = animate ? prevCountRef.current : cards.length;
 
-  // アニメーション完了後にカウントを更新
   useEffect(() => {
     if (cards.length !== prevCountRef.current) {
-      // 少し遅延してからカウントを更新（アニメーション完了後）
       const timer = setTimeout(() => {
         prevCountRef.current = cards.length;
       }, 600);
@@ -210,7 +283,6 @@ export const CommunityCards = memo(function CommunityCards({
     }
   }, [cards.length]);
 
-  // ボードがリセットされた場合は即座にカウントをリセット
   useEffect(() => {
     if (cards.length === 0) {
       prevCountRef.current = 0;
@@ -218,11 +290,10 @@ export const CommunityCards = memo(function CommunityCards({
   }, [cards.length]);
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}>
       {cards.map((card, index) => {
         const isHighlighted = allHighlightIndices.includes(index);
         const isNewCard = animate && index >= newCardsStartIndex;
-        // 新しいカードのみアニメーション、フロップは順番に
         const animationDelay = isNewCard ? (index - newCardsStartIndex) * 0.12 : 0;
 
         return (
@@ -235,17 +306,11 @@ export const CommunityCards = memo(function CommunityCards({
               boxShadow: isHighlighted ? '0 0 20px 4px rgba(34, 197, 94, 0.8)' : undefined,
             }}
           >
-            <div
-              style={{
-                boxShadow: isHighlighted ? '0 0 15px rgba(251, 191, 36, 0.8)' : undefined,
-                borderRadius: 8,
-              }}
-            >
-              <Card
-                card={card}
-                animate={false}
-                size="medium"
-              />
+            <div style={{
+              boxShadow: isHighlighted ? '0 0 15px rgba(251, 191, 36, 0.8)' : undefined,
+              borderRadius: cardSize.borderRadius + 1,
+            }}>
+              <Card card={card} animate={false} size={size} />
             </div>
           </div>
         );
@@ -255,15 +320,14 @@ export const CommunityCards = memo(function CommunityCards({
         <div
           key={`empty-${idx}`}
           style={{
-            width: 56,
-            height: 80,
-            borderRadius: 6,
+            width: cardSize.width,
+            height: cardSize.height,
+            borderRadius: cardSize.borderRadius,
             border: '2px dashed rgba(255,255,255,0.15)',
             background: 'rgba(0,0,0,0.1)',
           }}
         />
       ))}
-      {/* カードアニメーション用keyframes */}
       <style>{`
         @keyframes cardDealIn {
           0% {

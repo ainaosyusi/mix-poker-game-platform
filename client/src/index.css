@@ -2687,6 +2687,109 @@ body {
   }
 }
 
+/* ========================================
+   PORTRAIT MODE - スマホ縦向き対応
+   ======================================== */
+
+@media (max-width: 480px) and (orientation: portrait) {
+  /* テーブルページ: パディング縮小 */
+  .table-page {
+    padding: 8px;
+  }
+
+  /* テーブルヘッダー: コンパクト */
+  .table-header {
+    padding: 4px 8px;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .room-title {
+    font-size: 12px;
+  }
+
+  .game-variant-display {
+    padding: 3px 6px;
+  }
+
+  .game-variant-name {
+    font-size: 10px;
+  }
+
+  /* アクションパネル: 画面下部固定 */
+  .action-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-radius: 16px 16px 0 0;
+    max-width: 100%;
+    margin: 0;
+    padding: 12px 16px;
+    z-index: 150;
+  }
+
+  .action-buttons-row {
+    gap: 6px;
+  }
+
+  .action-btn {
+    padding: 10px 14px;
+    font-size: 12px;
+    min-width: 60px;
+  }
+
+  .quick-bet-row {
+    gap: 4px;
+  }
+
+  .quick-bet-btn {
+    padding: 6px 8px;
+    font-size: 10px;
+    min-width: 50px;
+  }
+
+  .bet-slider-container {
+    margin-bottom: 8px;
+  }
+
+  /* ゲームログ: 非表示（スペース節約） */
+  .game-log {
+    display: none;
+  }
+
+  /* ドローパネル: コンパクト */
+  .draw-panel {
+    margin: 10px auto;
+    padding: 12px;
+    max-width: calc(100% - 16px);
+  }
+
+  .draw-cards {
+    gap: 4px;
+  }
+
+  /* リバイパネル: 幅いっぱい */
+  .rebuy-panel {
+    width: calc(100% - 16px);
+    padding: 16px;
+    bottom: 10px;
+  }
+
+  /* ポット表示: コンパクト */
+  .pot-display {
+    padding: 6px 12px;
+  }
+
+  .pot-amount {
+    font-size: 14px;
+  }
+
+  .pot-label {
+    font-size: 8px;
+  }
+}
+
 /* タッチデバイス全般: ホバー効果を無効化 */
 @media (hover: none) and (pointer: coarse) {
   .action-btn:hover,

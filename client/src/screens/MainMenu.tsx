@@ -4,6 +4,7 @@
  */
 import { useState, useEffect } from 'react';
 import { apiPut, apiGet, setToken, clearToken } from '../api';
+import { useCardPreferencesContext } from '../contexts/CardPreferencesContext';
 import type { AuthUser } from './AuthScreen';
 
 const AVATAR_ICONS = [
@@ -56,6 +57,7 @@ export function MainMenu({ user, onNavigate, onLogout, onUserUpdate }: MainMenuP
   const [saveError, setSaveError] = useState('');
   const [stats, setStats] = useState<PlayerStats | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const { colorMode, toggleColorMode } = useCardPreferencesContext();
 
   // 統計情報を取得
   useEffect(() => {
@@ -212,6 +214,51 @@ export function MainMenu({ user, onNavigate, onLogout, onUserUpdate }: MainMenuP
                   {AVATAR_EMOJIS[icon]}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* カードカラーモード */}
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: '12px', display: 'block', marginBottom: '8px' }}>
+              Card Colors
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => toggleColorMode('2-color')}
+                style={{
+                  flex: 1, padding: '10px',
+                  border: colorMode === '2-color' ? '2px solid #3b82f6' : '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: '8px',
+                  background: colorMode === '2-color' ? 'rgba(59,130,246,0.2)' : 'rgba(0,0,0,0.2)',
+                  color: '#fff', cursor: 'pointer', fontSize: '13px',
+                }}
+              >
+                <div style={{ fontSize: '18px', letterSpacing: '2px' }}>
+                  <span style={{ color: '#1a1a2e' }}>♠</span>
+                  <span style={{ color: '#dc2626' }}>♥</span>
+                  <span style={{ color: '#dc2626' }}>♦</span>
+                  <span style={{ color: '#1a1a2e' }}>♣</span>
+                </div>
+                <div style={{ marginTop: '4px' }}>2-Color</div>
+              </button>
+              <button
+                onClick={() => toggleColorMode('4-color')}
+                style={{
+                  flex: 1, padding: '10px',
+                  border: colorMode === '4-color' ? '2px solid #3b82f6' : '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: '8px',
+                  background: colorMode === '4-color' ? 'rgba(59,130,246,0.2)' : 'rgba(0,0,0,0.2)',
+                  color: '#fff', cursor: 'pointer', fontSize: '13px',
+                }}
+              >
+                <div style={{ fontSize: '18px', letterSpacing: '2px' }}>
+                  <span style={{ color: '#1a1a2e' }}>♠</span>
+                  <span style={{ color: '#dc2626' }}>♥</span>
+                  <span style={{ color: '#2563eb' }}>♦</span>
+                  <span style={{ color: '#16a34a' }}>♣</span>
+                </div>
+                <div style={{ marginTop: '4px' }}>4-Color</div>
+              </button>
             </div>
           </div>
 
