@@ -1564,39 +1564,32 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // pendingSitOutをキャンセル（まだSIT_OUTになっていない場合）
-      if (player.pendingSitOut) {
-        player.pendingSitOut = false;
-        console.log(`👋 ${player.name} cancelled pending sit-out`);
-        socket.emit('im-back-success', { message: 'Sit-out cancelled' });
-        consecutiveTimeouts.delete(socket.id);
-        broadcastRoomState(roomId, room, io);
-        return;
-      }
+      console.log(`👋 ${player.name} pressed Im Back (status: ${player.status}, pendingSitOut: ${player.pendingSitOut}, roomStatus: ${room.gameState.status})`);
 
-      // ゲーム中は次のハンドから参加（pendingJoin設定）
-      if (room.gameState.status !== 'WAITING') {
-        player.pendingJoin = true;
-        player.pendingSitOut = false;
-        console.log(`👋 ${player.name} will join next hand`);
-        socket.emit('im-back-success', { message: 'Will join next hand' });
-      } else {
-        // 待機中なら即座に復帰
-        player.status = 'ACTIVE';
-        player.pendingJoin = false;
-        player.pendingSitOut = false;
-        console.log(`👋 ${player.name} returned from sit-out`);
-        socket.emit('im-back-success', { message: 'Returned to active' });
-
-        // ゲーム開始チェック（復帰後に人数が揃った場合）
-        scheduleNextHand(roomId, io);
-      }
-
-      // 連続タイムアウトカウンターをリセット
+      // フラグをクリア
+      player.pendingSitOut = false;
       consecutiveTimeouts.delete(socket.id);
 
-      // 部屋内の全員に更新を通知
-      broadcastRoomState(roomId, room, io);
+      if (room.gameState.status === 'WAITING') {
+        // 待機中なら即座に復帰してゲーム開始チェック
+        player.status = 'ACTIVE';
+        player.pendingJoin = false;
+        console.log(`👋 ${player.name} returned to ACTIVE (room is WAITING)`);
+        socket.emit('im-back-success');
+        broadcastRoomState(roomId, room, io);
+        scheduleNextHand(roomId, io);
+      } else if (player.status === 'SIT_OUT') {
+        // ゲーム中 + 既にSIT_OUT → 次のハンドから参加
+        player.pendingJoin = true;
+        console.log(`👋 ${player.name} will join next hand (game in progress)`);
+        socket.emit('im-back-success');
+        broadcastRoomState(roomId, room, io);
+      } else {
+        // ゲーム中 + pendingSitOutキャンセル（まだFOLDED/ACTIVEなのでそのまま続行）
+        console.log(`👋 ${player.name} cancelled pending sit-out (still in hand as ${player.status})`);
+        socket.emit('im-back-success');
+        broadcastRoomState(roomId, room, io);
+      }
 
     } catch (error: any) {
       socket.emit('error', { message: error.message });
