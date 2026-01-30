@@ -419,6 +419,74 @@ function evaluateRazz(cards: Card[]): RazzResult {
   return { cards: bestFive, name: `${cardNames.join('-')} Low`, hasPair: false };
 }
 
+// ========================================
+// A-5 LOW EVALUATION (for Hi-Lo games: PLO8, 7CS8)
+// ========================================
+
+// Compare two low hands (from highest card down). Returns negative if a is better.
+function compareLowHands(a: number[], b: number[]): number {
+  for (let i = a.length - 1; i >= 0; i--) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+// PLO8 Lo: Must use exactly 2 hole cards and 3 board cards, all <= 8, no pairs
+function getBestPLO8Low(holeCards: Card[], boardCards: Card[]): string | null {
+  if (holeCards.length < 2 || boardCards.length < 3) return null;
+
+  let bestCards: number[] | null = null;
+  const holeCombos = getCombinations(holeCards, 2);
+  const boardCombos = getCombinations(boardCards, 3);
+
+  for (const holeCombo of holeCombos) {
+    for (const boardCombo of boardCombos) {
+      const hand = [...holeCombo, ...boardCombo];
+      const lowValues = hand.map(c => LOW_RANK_VALUES[c.rank] || c.value);
+      if (lowValues.some(v => v > 8)) continue;
+      const uniqueValues = new Set(lowValues);
+      if (uniqueValues.size < 5) continue; // has pairs
+      const sorted = [...lowValues].sort((a, b) => a - b);
+      if (!bestCards || compareLowHands(sorted, bestCards) < 0) {
+        bestCards = sorted;
+      }
+    }
+  }
+
+  if (!bestCards) return null;
+  const cardNames = bestCards.map(v => {
+    const rank = Object.keys(LOW_RANK_VALUES).find(k => LOW_RANK_VALUES[k] === v);
+    return rank || v.toString();
+  });
+  return `Lo: ${cardNames.join('-')}`;
+}
+
+// 7CS8 Lo: Best 5 low cards from all cards, all <= 8, no pairs
+function getBest7CS8Low(cards: Card[]): string | null {
+  if (cards.length < 5) return null;
+
+  let bestCards: number[] | null = null;
+  const combos = getCombinations(cards, 5);
+
+  for (const combo of combos) {
+    const lowValues = combo.map(c => LOW_RANK_VALUES[c.rank] || c.value);
+    if (lowValues.some(v => v > 8)) continue;
+    const uniqueValues = new Set(lowValues);
+    if (uniqueValues.size < 5) continue;
+    const sorted = [...lowValues].sort((a, b) => a - b);
+    if (!bestCards || compareLowHands(sorted, bestCards) < 0) {
+      bestCards = sorted;
+    }
+  }
+
+  if (!bestCards) return null;
+  const cardNames = bestCards.map(v => {
+    const rank = Object.keys(LOW_RANK_VALUES).find(k => LOW_RANK_VALUES[k] === v);
+    return rank || v.toString();
+  });
+  return `Lo: ${cardNames.join('-')}`;
+}
+
 /**
  * Evaluate hand and return human-readable rank
  * @param holeCards Player's hole cards (e.g., ['AS', 'KH'])
@@ -461,10 +529,21 @@ export function evaluateHandRank(
     return '-';
   }
 
-  if (variant === '7CS' || variant === '7CS8') {
-    // For Stud hi games, use standard high hand evaluation
+  if (variant === '7CS') {
     if (hole.length >= 3) {
       return getBestHand(hole).name;
+    }
+    return '-';
+  }
+
+  if (variant === '7CS8') {
+    if (hole.length >= 3) {
+      const hiName = getBestHand(hole).name;
+      if (hole.length >= 5) {
+        const loName = getBest7CS8Low(hole);
+        if (loName) return `${hiName} / ${loName}`;
+      }
+      return hiName;
     }
     return '-';
   }
@@ -493,8 +572,15 @@ export function evaluateHandRank(
   // Postflop evaluation
   let result: HandResult;
 
-  if (variant === 'PLO' || variant === 'PLO8') {
+  if (variant === 'PLO') {
     result = getBestPLOHand(hole, board);
+  } else if (variant === 'PLO8') {
+    result = getBestPLOHand(hole, board);
+    const loName = getBestPLO8Low(hole, board);
+    if (loName) {
+      return `${result.name} / ${loName}`;
+    }
+    return result.name;
   } else {
     // NLH and other variants: use any 5 from 7
     result = getBestHand([...hole, ...board]);

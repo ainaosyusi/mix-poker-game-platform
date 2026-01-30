@@ -74,6 +74,32 @@ function getChipPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSPropert
   }
 }
 
+// Stud用アップカード位置（テーブル中央寄り、チップと重ならない位置）
+function getStudUpCardsPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
+  if (maxPlayers === 6) {
+    switch (seatIndex) {
+      case 0: return { bottom: '100%', marginBottom: 20, left: '50%', transform: 'translateX(-50%)' };
+      case 1: return { bottom: '70%', right: '-55%' };
+      case 2: return { top: '70%', right: '-55%' };
+      case 3: return { top: '100%', marginTop: 20, left: '50%', transform: 'translateX(-50%)' };
+      case 4: return { top: '70%', left: '-55%' };
+      case 5: return { bottom: '70%', left: '-55%' };
+      default: return { bottom: '100%', marginBottom: 20, left: '50%', transform: 'translateX(-50%)' };
+    }
+  }
+  switch (seatIndex) {
+    case 0: return { bottom: '100%', marginBottom: 20, left: '50%', transform: 'translateX(-50%)' };
+    case 1: return { bottom: '50%', right: '-45%' };
+    case 2: return { top: '30%', right: '-55%' };
+    case 3: return { top: '50%', right: '-45%' };
+    case 4: return { top: '100%', marginTop: 20, left: '50%', transform: 'translateX(-50%)' };
+    case 5: return { top: '50%', left: '-45%' };
+    case 6: return { top: '30%', left: '-55%' };
+    case 7: return { bottom: '50%', left: '-45%' };
+    default: return { bottom: '100%', marginBottom: 20, left: '50%', transform: 'translateX(-50%)' };
+  }
+}
+
 // ディーラーボタン位置を座席に応じて計算（チップと重ならない位置）
 function getDealerButtonPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
@@ -388,28 +414,20 @@ export const PlayerSeat = memo(function PlayerSeat({
         </div>
       )}
 
-      {/* Stud用アップカード（テーブル上に斜めに配置） */}
-      {isStudGame && player.studUpCards && player.studUpCards.length > 0 && (
+      {/* Stud用アップカード（テーブル上にきれいに配置、座席に応じた位置） */}
+      {isStudGame && player.studUpCards && player.studUpCards.length > 0 && !isFolded && (
         <div
           style={{
             position: 'absolute',
-            bottom: '85%',
-            left: '50%',
+            ...getStudUpCardsPosition(seatIndex, maxPlayers),
             display: 'flex',
-            transform: 'translateX(-50%)',
+            gap: 2,
             zIndex: 15,
           }}
         >
           {player.studUpCards.map((card, i) => (
-            <div
-              key={i}
-              style={{
-                transform: `rotate(${(i - (player.studUpCards!.length - 1) / 2) * 8}deg)`,
-                marginLeft: i > 0 ? -10 : 0,
-                zIndex: i,
-              }}
-            >
-              <Card card={card} size="tiny" />
+            <div key={i} style={{ zIndex: i }}>
+              <Card card={card} size="small" />
             </div>
           ))}
         </div>
