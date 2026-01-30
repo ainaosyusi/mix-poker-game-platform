@@ -27,8 +27,8 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
             maxPlayers: 6,
             smallBlind: 1,
             bigBlind: 2,
-            buyInMin: 40,
-            buyInMax: 200,
+            buyInMin: 100,    // 50BB
+            buyInMax: 400,    // 200BB
             allowedGames: ['NLH'],
         },
     },
@@ -40,8 +40,8 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
             maxPlayers: 6,
             smallBlind: 2,
             bigBlind: 5,
-            buyInMin: 100,
-            buyInMax: 500,
+            buyInMin: 250,    // 50BB
+            buyInMax: 1000,   // 200BB
             allowedGames: ['NLH'],
         },
     },
@@ -53,8 +53,8 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
             maxPlayers: 6,
             smallBlind: 5,
             bigBlind: 10,
-            buyInMin: 200,
-            buyInMax: 1000,
+            buyInMin: 500,    // 50BB
+            buyInMax: 2000,   // 200BB
             allowedGames: ['NLH'],
         },
     },
@@ -68,8 +68,8 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
             maxPlayers: 6,
             smallBlind: 2,
             bigBlind: 5,
-            buyInMin: 100,
-            buyInMax: 500,
+            buyInMin: 250,    // 50BB
+            buyInMax: 1000,   // 200BB
             allowedGames: ['PLO', 'PLO8'],
         },
         rotationConfig: {
@@ -86,8 +86,8 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
             maxPlayers: 6,
             smallBlind: 2,
             bigBlind: 5,
-            buyInMin: 100,
-            buyInMax: 500,
+            buyInMin: 250,    // 50BB
+            buyInMax: 1000,   // 200BB
             allowedGames: ['2-7_TD', 'NLH', 'PLO', 'RAZZ', '7CS', '7CS8', 'PLO8', 'BADUGI'],
         },
         rotationConfig: {
@@ -104,8 +104,8 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
             maxPlayers: 6,
             smallBlind: 2,
             bigBlind: 5,
-            buyInMin: 100,
-            buyInMax: 500,
+            buyInMin: 250,    // 50BB
+            buyInMax: 1000,   // 200BB
             allowedGames: ['2-7_TD', 'NLH', 'PLO', 'RAZZ', '7CS', '7CS8', 'PLO8', 'BADUGI', 'NLH', 'PLO'],
         },
         rotationConfig: {
@@ -122,8 +122,8 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
             maxPlayers: 6,
             smallBlind: 2,
             bigBlind: 5,
-            buyInMin: 100,
-            buyInMax: 500,
+            buyInMin: 250,    // 50BB
+            buyInMax: 1000,   // 200BB
             allowedGames: ['NLH', 'PLO', 'PLO8', '7CS', '7CS8', 'RAZZ', '2-7_TD', 'BADUGI'],
         },
         rotationConfig: {

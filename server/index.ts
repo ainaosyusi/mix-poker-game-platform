@@ -60,7 +60,8 @@ const activeTimers: Map<string, PlayerTimer> = new Map(); // playerId -> timer
 const playerTimeBanks: Map<string, number> = new Map(); // playerId -> chips
 const consecutiveTimeouts: Map<string, number> = new Map(); // playerId -> timeout count
 
-const MAX_TIMER_SECONDS = 30;
+const PREFLOP_TIMER_SECONDS = 15;
+const POSTFLOP_TIMER_SECONDS = 30;
 const INITIAL_TIMEBANK_CHIPS = 5;
 const MAX_CONSECUTIVE_TIMEOUTS = 3; // 3回連続タイムアウトでSIT_OUT
 const HAND_END_DELAY_MS = 2000;
@@ -109,6 +110,15 @@ function cleanupPendingLeavers(roomId: string, io: Server): boolean {
   return false;
 }
 
+// フェーズに応じたタイマー秒数を返す
+function getTimerSeconds(room: any): number {
+  // プリフロップ（PLAYING状態でboard.length === 0）は15秒
+  if (room && room.gameState.board.length === 0) {
+    return PREFLOP_TIMER_SECONDS;
+  }
+  return POSTFLOP_TIMER_SECONDS;
+}
+
 // タイマー開始関数
 function startPlayerTimer(roomId: string, playerId: string, io: Server) {
   // 既存のタイマーをクリア
@@ -119,10 +129,13 @@ function startPlayerTimer(roomId: string, playerId: string, io: Server) {
     playerTimeBanks.set(playerId, INITIAL_TIMEBANK_CHIPS);
   }
 
+  const room = roomManager.getRoomById(roomId);
+  const timerSeconds = getTimerSeconds(room);
+
   const timer: PlayerTimer = {
     roomId,
     playerId,
-    seconds: MAX_TIMER_SECONDS,
+    seconds: timerSeconds,
     intervalId: setInterval(() => {
       const t = activeTimers.get(playerId);
       if (!t) return;
@@ -234,7 +247,7 @@ function emitYourTurn(roomId: string, room: any, engine: GameEngine, io: Server,
     isCapped: bettingInfo.isCapped,
     raisesRemaining: bettingInfo.raisesRemaining,
     fixedBetSize: bettingInfo.fixedBetSize,
-    timeout: MAX_TIMER_SECONDS * 1000,
+    timeout: getTimerSeconds(room) * 1000,
     actionToken
   });
 
@@ -1036,8 +1049,8 @@ function parseDiscardIndexes(
 }
 
 function validateQuickJoinBuyIn(room: any, buyIn: number, socket: any): boolean {
-  const minBuyIn = room.config.buyInMin || room.config.bigBlind * 20;
-  const maxBuyIn = room.config.buyInMax || room.config.bigBlind * 100;
+  const minBuyIn = room.config.buyInMin || room.config.bigBlind * 50;
+  const maxBuyIn = room.config.buyInMax || room.config.bigBlind * 200;
   if (buyIn < minBuyIn || buyIn > maxBuyIn) {
     socket.emit('error', { message: `Buy-in must be between ${minBuyIn} and ${maxBuyIn}` });
     return false;
@@ -1490,9 +1503,19 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // SIT_OUT状態でない場合は何もしない
-      if (player.status !== 'SIT_OUT') {
-        console.log(`⚠️  ${player.name} tried to return but is not sitting out (status: ${player.status})`);
+      // SIT_OUTまたはpendingSitOutでない場合は何もしない
+      if (player.status !== 'SIT_OUT' && !player.pendingSitOut) {
+        console.log(`⚠️  ${player.name} tried to return but is not sitting out (status: ${player.status}, pendingSitOut: ${player.pendingSitOut})`);
+        return;
+      }
+
+      // pendingSitOutをキャンセル（まだSIT_OUTになっていない場合）
+      if (player.pendingSitOut) {
+        player.pendingSitOut = false;
+        console.log(`👋 ${player.name} cancelled pending sit-out`);
+        socket.emit('im-back-success', { message: 'Sit-out cancelled' });
+        consecutiveTimeouts.delete(socket.id);
+        broadcastRoomState(roomId, room, io);
         return;
       }
 

@@ -548,6 +548,30 @@ export const PlayerSeat = memo(function PlayerSeat({
             FOLD
           </div>
         )}
+        {/* 最後のアクション表示（ALL_IN/FOLD以外） */}
+        {!isAllIn && !isFolded && player.lastAction && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: -20,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontSize: 10,
+              fontWeight: 'bold',
+              background: player.lastAction === 'RAISE' || player.lastAction === 'BET'
+                ? '#d97706' : player.lastAction === 'CALL'
+                ? '#2563eb' : '#059669',
+              color: '#ffffff',
+              textTransform: 'uppercase',
+              letterSpacing: 1,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {player.lastAction}
+          </div>
+        )}
 
         {/* タイマーバー */}
         {isActive && (

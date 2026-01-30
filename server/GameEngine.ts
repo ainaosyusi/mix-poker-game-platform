@@ -80,6 +80,7 @@ export class GameEngine {
             player.hand = null;
             player.bet = 0;
             player.totalBet = 0;
+            player.lastAction = undefined;
             if (player.studUpCards) player.studUpCards = [];
         }
     }
@@ -186,6 +187,9 @@ export class GameEngine {
         if (actionError) {
             return { success: false, error: actionError };
         }
+
+        // アクション表示を設定
+        player.lastAction = action.type;
 
         // 次のプレイヤーに移動
         this.advanceAction(room);

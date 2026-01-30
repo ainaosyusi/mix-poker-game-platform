@@ -102,10 +102,19 @@ export function useTableSocketEvents({
       setShowdownResult(result);
       setYourHand([]);
       setIsYourTurn(false);
+
+      // チョップ（引き分け）判定: 同じhandRankの勝者が複数いるかチェック
+      const rankCounts = new Map<string, number>();
       result.winners.forEach(w => {
+        rankCounts.set(w.handRank, (rankCounts.get(w.handRank) || 0) + 1);
+      });
+
+      result.winners.forEach(w => {
+        const isChop = (rankCounts.get(w.handRank) || 0) > 1;
+        const label = isChop ? 'splits' : 'wins';
         addLog(createEventLog(
           'win',
-          `${w.playerName} wins ${w.amount.toLocaleString()} (${w.handRank})`,
+          `${w.playerName} ${label} ${w.amount.toLocaleString()} (${w.handRank})`,
           w.hand && w.hand.length > 0 ? w.hand : undefined
         ));
       });
@@ -183,6 +192,10 @@ export function useTableSocketEvents({
       }
     };
 
+    const handleNextGame = (data: { nextGame: string; gamesList: string[] }) => {
+      addLog(createEventLog('info', `Next game: ${data.nextGame}`));
+    };
+
     socket.on('room-state-update', handleRoomState);
     socket.on('room-joined', handleRoomJoined);
     socket.on('game-started', handleGameStarted);
@@ -198,6 +211,7 @@ export function useTableSocketEvents({
     socket.on('player-drew', handlePlayerDrew);
     socket.on('runout-started', handleRunoutStarted);
     socket.on('runout-board', handleRunoutBoard);
+    socket.on('next-game', handleNextGame);
 
     return () => {
       socket.off('room-state-update', handleRoomState);
@@ -215,6 +229,7 @@ export function useTableSocketEvents({
       socket.off('player-drew', handlePlayerDrew);
       socket.off('runout-started', handleRunoutStarted);
       socket.off('runout-board', handleRunoutBoard);
+      socket.off('next-game', handleNextGame);
     };
   }, [
     socket,

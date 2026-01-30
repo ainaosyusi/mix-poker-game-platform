@@ -12,6 +12,7 @@ export interface Player {
   status: 'ACTIVE' | 'FOLDED' | 'ALL_IN' | 'SIT_OUT';
   hand?: string[] | null;
   studUpCards?: string[];  // Stud games: public up cards
+  lastAction?: string;     // Last action taken (CHECK, BET, CALL, RAISE, FOLD, ALL_IN)
   waitingForBB?: boolean;
   pendingJoin?: boolean;
   pendingSitOut?: boolean;

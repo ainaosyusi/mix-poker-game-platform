@@ -98,6 +98,9 @@ export interface Player {
     userId?: string;           // DBのユーザーID（認証済みの場合）
     avatarIcon?: string;       // プリセットアバターアイコン
 
+    // アクション表示
+    lastAction?: string;       // 最後に行ったアクション（CHECK, BET, CALL, RAISE, FOLD, ALL_IN）
+
     // ゲーム固有情報（オプショナル）
     drawDiscards?: number;     // ドローゲームで何枚交換したか
     studUpCards?: string[];    // スタッドの公開カード
