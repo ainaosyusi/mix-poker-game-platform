@@ -354,9 +354,11 @@ function scheduleNextHand(roomId: string, io: Server) {
     return;
   }
 
-  // ACTIVEプレイヤー数を確認（pendingJoinやSIT_OUT、スタック0は除く）
+  // ACTIVEプレイヤー + pendingJoin(BB待ちでない)SIT_OUTプレイヤーを確認
+  // pendingJoin && !waitingForBB のSIT_OUTプレイヤーはresetPlayersForNewHandでACTIVEになるのでカウントする
   const activePlayers = room.players.filter(p =>
-    p !== null && p.stack > 0 && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
+    p !== null && p.stack > 0 && !p.pendingSitOut && !p.pendingLeave &&
+    (p.status !== 'SIT_OUT' || (p.pendingJoin && !p.waitingForBB))
   );
 
   console.log(`🎲 scheduleNextHand called for room ${roomId}`);
@@ -385,9 +387,10 @@ function scheduleNextHand(roomId: string, io: Server) {
     const currentRoom = roomManager.getRoomById(roomId);
     if (!currentRoom || currentRoom.gameState.status !== 'WAITING') return;
 
-    // 再度ACTIVEプレイヤー数をチェック（スタック0のプレイヤーを除外）
+    // 再度プレイヤー数をチェック（pendingJoin && !waitingForBBのSIT_OUTも含む）
     const readyPlayers = currentRoom.players.filter(p =>
-      p !== null && p.stack > 0 && p.status !== 'SIT_OUT' && !p.pendingJoin && !p.pendingSitOut && !p.pendingLeave
+      p !== null && p.stack > 0 && !p.pendingSitOut && !p.pendingLeave &&
+      (p.status !== 'SIT_OUT' || (p.pendingJoin && !p.waitingForBB))
     );
     if (readyPlayers.length < 2) return;
 

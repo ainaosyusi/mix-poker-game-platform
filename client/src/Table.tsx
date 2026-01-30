@@ -203,7 +203,8 @@ export function Table({
   const seatedPlayerCount = room.players.filter(p => p !== null).length;
   const isWaiting = room.gameState.status === 'WAITING';
   const yourPlayer = isSeated ? room.players[yourSeatIndex] : null;
-  const isSittingOut = yourPlayer?.status === 'SIT_OUT' || yourPlayer?.pendingSitOut;
+  const isPendingJoin = yourPlayer?.status === 'SIT_OUT' && yourPlayer?.pendingJoin;
+  const isSittingOut = (yourPlayer?.status === 'SIT_OUT' || yourPlayer?.pendingSitOut) && !yourPlayer?.pendingJoin;
 
   const currentRoundBets = room.players.reduce((sum, p) => sum + (p?.bet || 0), 0);
   const totalPotRaw = room.gameState.pot.main + room.gameState.pot.side.reduce((sum, s) => sum + s.amount, 0);
@@ -301,7 +302,7 @@ export function Table({
       )}
 
       {/* アクションパネル（ドローフェーズ中は非表示） */}
-      {isSeated && !isWaiting && !showdownResult && !isSittingOut && !isDrawPhase && (
+      {isSeated && !isWaiting && !showdownResult && !isSittingOut && !isPendingJoin && !isDrawPhase && (
         <ActionPanel
           validActions={validActions}
           currentBet={currentBetInfo.currentBet}
@@ -408,6 +409,22 @@ export function Table({
               I'm Back
             </button>
           </div>
+          <div className="rebuy-options">
+            <button className="action-btn fold small" onClick={handleLeaveRoom}>
+              Leave Table
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 復帰待ちパネル - Im Back押した後、次のハンド待ち */}
+      {isSeated && isPendingJoin && yourStack > 0 && (
+        <div className="rebuy-panel">
+          <div className="rebuy-header">
+            <span className="rebuy-icon">⏳</span>
+            <h3 className="rebuy-title">Joining Next Hand</h3>
+          </div>
+          <p className="rebuy-message">You will join the next hand</p>
           <div className="rebuy-options">
             <button className="action-btn fold small" onClick={handleLeaveRoom}>
               Leave Table
