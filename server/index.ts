@@ -32,8 +32,13 @@ import { PotManager } from './PotManager.js';
 import { getVariantConfig } from './gameVariants.js';
 import { logEvent, incrementMetric } from './logger.js';
 import authRoutes from './auth/authRoutes.js';
+import statsRoutes from './stats/statsRoutes.js';
 import { verifyToken } from './auth/authService.js';
 import { findRandomEmptySeat } from './autoSeating.js';
+import {
+  startSession, recordAddOn, endSession,
+  recordHandResult, migrateSession, hasActiveSession
+} from './stats/sessionTracker.js';
 
 // Phase 3-B: ゲームエンジンインスタンス（部屋ごとに管理）
 const gameEngines: Map<string, GameEngine> = new Map();
@@ -496,6 +501,12 @@ function handleInGameExit(
   io: Server
 ) {
   const player = room.players[seatIndex]!;
+
+  // セッション追跡: キャッシュアウト記録（ハンド中退出は現在のスタックで記録）
+  if (hasActiveSession(socket.id)) {
+    endSession(socket.id, player.stack);
+  }
+
   player.pendingLeave = true;
   player.pendingSitOut = true;
   player.pendingJoin = false;
@@ -539,6 +550,15 @@ function handleWaitingExit(
   leaveRoom: boolean,
   io: Server
 ) {
+  // セッション追跡: キャッシュアウト記録
+  const exitRoom = roomManager.getRoomById(roomId);
+  if (exitRoom) {
+    const exitPlayer = exitRoom.players.find(p => p?.socketId === socket.id);
+    if (exitPlayer && hasActiveSession(socket.id)) {
+      endSession(socket.id, exitPlayer.stack);
+    }
+  }
+
   roomManager.standUp(roomId, socket.id);
   if (leaveRoom) {
     socket.leave(`room:${roomId}`);
@@ -796,6 +816,15 @@ function handleAllInRunout(roomId: string, room: any, io: Server) {
 
       io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
 
+      // セッション追跡: ハンド結果記録（オールインランアウト）
+      {
+        const allPlayerIds = room.players
+          .filter((p: any) => p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN' || p.status === 'FOLDED'))
+          .map((p: any) => p.socketId);
+        const winnerIds = showdownResult.winners.map((w: any) => w.playerId);
+        recordHandResult(winnerIds, allPlayerIds);
+      }
+
       if (showdownResult.winners.length > 0) {
         for (const winner of showdownResult.winners) {
           const bonus = metaGameManager.checkSevenDeuce(room, winner.playerId, winner.hand);
@@ -882,6 +911,15 @@ function handleNormalShowdown(roomId: string, room: any, io: Server) {
   }
 
   io.to(`room:${roomId}`).emit('showdown-result', showdownResult);
+
+  // セッション追跡: ハンド結果記録
+  {
+    const allPlayerIds = room.players
+      .filter((p: any) => p !== null && (p.status === 'ACTIVE' || p.status === 'ALL_IN' || p.status === 'FOLDED'))
+      .map((p: any) => p.socketId);
+    const winnerIds = showdownResult.winners.map((w: any) => w.playerId);
+    recordHandResult(winnerIds, allPlayerIds);
+  }
 
   if (showdownResult.winners.length > 0) {
     for (const winner of showdownResult.winners) {
@@ -1135,6 +1173,9 @@ app.use(express.json());
 // 認証APIルート
 app.use('/api/auth', authRoutes);
 
+// 統計APIルート
+app.use('/api/stats', statsRoutes);
+
 // ヘルスチェック用エンドポイント（全環境共通）
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', message: 'Mix Poker Game Server is running' });
@@ -1220,6 +1261,9 @@ io.on('connection', (socket) => {
               oldSocket.disconnect(true);
             }
           }
+
+          // セッション追跡: socketId移行
+          migrateSession(previousSocketId, socket.id);
 
           existingPlayer.socketId = socket.id;
           existingPlayer.disconnected = false;
@@ -1393,6 +1437,11 @@ io.on('connection', (socket) => {
       logEvent('quick_join', { roomId: data.roomId, playerName, seatIndex, buyIn: data.buyIn });
       incrementMetric('quick_join');
 
+      // セッション追跡開始
+      if (user?.userId) {
+        startSession(socket.id, user.userId, data.roomId, room.gameState.gameVariant, data.buyIn);
+      }
+
       // 参加成功を通知（本人）
       socket.emit('room-joined', {
         room: sanitizeRoomForViewer(room, socket.id),
@@ -1460,6 +1509,9 @@ io.on('connection', (socket) => {
       // リバイ実行
       player.stack = newStack;
       console.log(`💰 ${player.name} rebought for ${data.amount} (new stack: ${newStack})`);
+
+      // セッション追跡: アドオン記録
+      recordAddOn(socket.id, data.amount);
 
       // ステータスをACTIVEに戻す（SIT_OUTやその他の状態から復帰）
       if (player.status !== 'ACTIVE') {

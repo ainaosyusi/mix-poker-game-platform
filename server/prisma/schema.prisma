@@ -8,11 +8,30 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  username     String   @unique
+  id           String          @id @default(uuid())
+  username     String          @unique
   passwordHash String
   displayName  String
-  avatarIcon   String   @default("default")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  avatarIcon   String          @default("default")
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  sessions     PlayerSession[]
+}
+
+model PlayerSession {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  roomId      String
+  gameVariant String
+  buyIn       Int
+  addOns      Int       @default(0)
+  cashOut     Int?
+  handsPlayed Int       @default(0)
+  handsWon    Int       @default(0)
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+
+  @@index([userId])
+  @@index([userId, startedAt])
 }

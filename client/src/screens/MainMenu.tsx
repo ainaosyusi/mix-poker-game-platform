@@ -1,9 +1,9 @@
 /**
  * MainMenu - メインメニュー画面
- * アカウント設定、ゲームモード選択
+ * アカウント設定、ゲームモード選択、プレイヤー統計表示
  */
-import { useState } from 'react';
-import { apiPut, setToken, clearToken } from '../api';
+import { useState, useEffect } from 'react';
+import { apiPut, apiGet, setToken, clearToken } from '../api';
 import type { AuthUser } from './AuthScreen';
 
 const AVATAR_ICONS = [
@@ -15,6 +15,31 @@ const AVATAR_EMOJIS: Record<string, string> = {
   default: '👤', cat: '🐱', dog: '🐶', bear: '🐻', fox: '🦊', owl: '🦉',
   fish: '🐟', star: '⭐', moon: '🌙', fire: '🔥', diamond: '💎', crown: '👑',
 };
+
+interface PlayerStats {
+  totalSessions: number;
+  totalBuyIn: number;
+  totalCashOut: number;
+  totalProfit: number;
+  totalHandsPlayed: number;
+  totalHandsWon: number;
+  winRate: number;
+  todayProfit: number;
+  todaySessions: number;
+  recentSessions: Array<{
+    id: string;
+    roomId: string;
+    gameVariant: string;
+    buyIn: number;
+    addOns: number;
+    cashOut: number | null;
+    profit: number | null;
+    handsPlayed: number;
+    handsWon: number;
+    startedAt: string;
+    endedAt: string | null;
+  }>;
+}
 
 interface MainMenuProps {
   user: AuthUser;
@@ -29,6 +54,15 @@ export function MainMenu({ user, onNavigate, onLogout, onUserUpdate }: MainMenuP
   const [editAvatar, setEditAvatar] = useState(user.avatarIcon);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [stats, setStats] = useState<PlayerStats | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // 統計情報を取得
+  useEffect(() => {
+    apiGet<PlayerStats>('/api/stats/me')
+      .then(setStats)
+      .catch(() => { /* stats unavailable */ });
+  }, []);
 
   const handleSaveProfile = async () => {
     setSaving(true);
@@ -59,6 +93,11 @@ export function MainMenu({ user, onNavigate, onLogout, onUserUpdate }: MainMenuP
     clearToken();
     localStorage.removeItem('mgp-last-room');
     onLogout();
+  };
+
+  const formatProfit = (value: number) => {
+    const sign = value >= 0 ? '+' : '';
+    return `${sign}${value.toLocaleString()}`;
   };
 
   return (
@@ -219,6 +258,127 @@ export function MainMenu({ user, onNavigate, onLogout, onUserUpdate }: MainMenuP
           >
             Logout
           </button>
+        </div>
+      )}
+
+      {/* Player Stats */}
+      {stats && stats.totalSessions > 0 && (
+        <div style={{
+          background: 'rgba(255,255,255,0.05)',
+          backdropFilter: 'blur(10px)',
+          borderRadius: '16px',
+          border: '1px solid rgba(255,255,255,0.1)',
+          padding: '20px 24px',
+          width: '100%',
+          maxWidth: '400px',
+          marginBottom: '20px',
+        }}>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            marginBottom: '16px',
+          }}>
+            <h3 style={{ color: '#fff', margin: 0, fontSize: '14px' }}>Stats</h3>
+            {stats.recentSessions.length > 0 && (
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                style={{
+                  background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)',
+                  fontSize: '12px', cursor: 'pointer',
+                }}
+              >
+                {showHistory ? 'Hide History' : 'History'}
+              </button>
+            )}
+          </div>
+
+          {/* Summary Row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize: '18px', fontWeight: 700,
+                color: stats.totalProfit >= 0 ? '#10b981' : '#ef4444',
+              }}>
+                {formatProfit(stats.totalProfit)}
+              </div>
+              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', marginTop: '2px' }}>
+                Total Profit
+              </div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize: '18px', fontWeight: 700,
+                color: stats.todayProfit >= 0 ? '#10b981' : '#ef4444',
+              }}>
+                {formatProfit(stats.todayProfit)}
+              </div>
+              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', marginTop: '2px' }}>
+                Today
+              </div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>
+                {stats.winRate}%
+              </div>
+              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)', marginTop: '2px' }}>
+                Win Rate
+              </div>
+            </div>
+          </div>
+
+          {/* Detail Row */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between',
+            padding: '8px 0', borderTop: '1px solid rgba(255,255,255,0.06)',
+            fontSize: '12px', color: 'rgba(255,255,255,0.5)',
+          }}>
+            <span>{stats.totalSessions} sessions</span>
+            <span>{stats.totalHandsPlayed} hands</span>
+            <span>{stats.totalHandsWon} won</span>
+          </div>
+
+          {/* Recent Sessions */}
+          {showHistory && stats.recentSessions.length > 0 && (
+            <div style={{
+              marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.06)',
+              paddingTop: '12px',
+            }}>
+              <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginBottom: '8px' }}>
+                Recent Sessions
+              </div>
+              {stats.recentSessions.map((s) => {
+                const profit = s.profit ?? 0;
+                const date = new Date(s.startedAt);
+                const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+                return (
+                  <div key={s.id} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.03)',
+                    fontSize: '12px',
+                  }}>
+                    <div>
+                      <span style={{ color: 'rgba(255,255,255,0.6)' }}>{dateStr}</span>
+                      <span style={{ color: 'rgba(255,255,255,0.3)', marginLeft: '8px' }}>
+                        {s.gameVariant}
+                      </span>
+                    </div>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                    }}>
+                      <span style={{ color: 'rgba(255,255,255,0.4)' }}>
+                        {s.handsPlayed}h
+                      </span>
+                      <span style={{
+                        fontWeight: 600, minWidth: '60px', textAlign: 'right',
+                        color: profit >= 0 ? '#10b981' : '#ef4444',
+                      }}>
+                        {formatProfit(profit)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
