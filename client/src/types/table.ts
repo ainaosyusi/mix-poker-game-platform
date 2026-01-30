@@ -41,6 +41,20 @@ export interface RoomConfig {
   buyInMin: number;
   buyInMax: number;
   allowedGames?: string[];
+  password?: string;
+}
+
+// 保留設定変更
+export interface PendingConfigChange {
+  config?: Partial<RoomConfig>;
+  rotation?: {
+    enabled?: boolean;
+    gamesList?: string[];
+    handsPerGame?: number;
+  };
+  gameVariant?: string;
+  requestedBy: string;
+  requestedAt: number;
 }
 
 // ローテーション状態
@@ -62,6 +76,7 @@ export interface MetaGameState {
 // 部屋情報
 export interface Room {
   id: string;
+  hostId?: string;
   config: RoomConfig;
   players: (Player | null)[];
   gameState: GameState;
@@ -70,6 +85,7 @@ export interface Room {
   streetStarterIndex: number;
   rotation: RotationState;
   metaGame: MetaGameState;
+  pendingConfig?: PendingConfigChange;
 }
 
 // アクションタイプ

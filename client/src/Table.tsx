@@ -18,6 +18,7 @@ import { useDrawPhaseState } from './hooks/useDrawPhaseState';
 import { useLeaveRoomOnUnmount } from './hooks/useLeaveRoomOnUnmount';
 import { useOrientation } from './hooks/useOrientation';
 import { useSyncYourHand } from './hooks/useSyncYourHand';
+import { HostControlsPanel } from './components/HostControlsPanel';
 import type {
   Player,
   GameState,
@@ -81,6 +82,9 @@ export function Table({
   const [isLogCollapsed, setIsLogCollapsed] = useState(false);
   const [rebuyAmount, setRebuyAmount] = useState(500);
   const [actionToken, setActionToken] = useState<string | null>(null);
+
+  // Host controls
+  const [showHostControls, setShowHostControls] = useState(false);
 
   // Draw game用state
   const [isDrawPhase, setIsDrawPhase] = useState(false);
@@ -217,13 +221,30 @@ export function Table({
   const yourBet = isSeated ? (room.players[yourSeatIndex]?.bet || 0) : 0;
   const yourStack = isSeated ? (room.players[yourSeatIndex]?.stack || 0) : 0;
   const maxPlayers = (room.config.maxPlayers as 6 | 8) || 6;
+  const isHost = room.hostId === yourSocketId;
+  const isPrivateRoom = !!room.hostId;
 
   return (
     <div className="table-page">
       {/* ヘッダー */}
       <header className="table-header">
         <div className="header-left">
-          <h1 className="room-title">🎰 Room {roomId}</h1>
+          <h1 className="room-title">
+            {isPrivateRoom ? '🔒' : '🎰'} Room {roomId}
+            {isPrivateRoom && (
+              <button
+                onClick={() => navigator.clipboard.writeText(roomId)}
+                style={{
+                  background: 'rgba(255,255,255,0.1)', border: 'none', color: 'rgba(255,255,255,0.6)',
+                  fontSize: '10px', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px',
+                  cursor: 'pointer', verticalAlign: 'middle',
+                }}
+                title="Copy room number"
+              >
+                Copy
+              </button>
+            )}
+          </h1>
           <div className="room-info-row">
             <span className="blinds-info">{room.config.smallBlind}/{room.config.bigBlind}</span>
             <span className="hand-info">Hand #{room.gameState.handNumber}</span>
@@ -238,10 +259,46 @@ export function Table({
             </span>
           )}
         </div>
-        <button className="action-btn fold" onClick={handleLeaveRoom}>
-          Leave
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {isHost && (
+            <button
+              className="action-btn"
+              onClick={() => setShowHostControls(true)}
+              style={{
+                background: 'rgba(139,92,246,0.2)', border: '1px solid rgba(139,92,246,0.4)',
+                color: '#c4b5fd', fontSize: '12px', padding: '6px 12px', borderRadius: '8px',
+                cursor: 'pointer', fontWeight: 600,
+              }}
+            >
+              Settings
+            </button>
+          )}
+          <button className="action-btn fold" onClick={handleLeaveRoom}>
+            Leave
+          </button>
+        </div>
       </header>
+
+      {/* 保留設定バナー */}
+      {room.pendingConfig && (
+        <div style={{
+          position: 'fixed', top: '52px', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(245,158,11,0.2)', border: '1px solid rgba(245,158,11,0.4)',
+          borderRadius: '8px', padding: '6px 16px', zIndex: 50,
+          color: '#fbbf24', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap',
+        }}>
+          Settings change pending after this hand
+        </div>
+      )}
+
+      {/* ホストコントロールパネル */}
+      {showHostControls && isHost && (
+        <HostControlsPanel
+          room={room}
+          socket={socket}
+          onClose={() => setShowHostControls(false)}
+        />
+      )}
 
       {/* ポーカーテーブル */}
       <PokerTable

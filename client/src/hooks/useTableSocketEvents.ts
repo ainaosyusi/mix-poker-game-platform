@@ -196,6 +196,32 @@ export function useTableSocketEvents({
       addLog(createEventLog('info', `Next game: ${data.nextGame}`));
     };
 
+    // プライベートルーム: 設定変更保留
+    const handleConfigPending = (data: { pendingConfig: any; message: string }) => {
+      setRoom(prev => prev ? { ...prev, pendingConfig: data.pendingConfig } : prev);
+      addLog(createEventLog('info', data.message));
+    };
+
+    // プライベートルーム: 設定変更適用
+    const handleConfigApplied = (data: { config: any; rotation: any; gameVariant: string }) => {
+      setRoom(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          config: { ...prev.config, ...data.config },
+          gameState: { ...prev.gameState, gameVariant: data.gameVariant },
+          pendingConfig: undefined,
+        };
+      });
+      addLog(createEventLog('info', 'Room settings updated'));
+    };
+
+    // プライベートルーム: ホスト移譲
+    const handleHostChanged = (data: { newHostId: string }) => {
+      setRoom(prev => prev ? { ...prev, hostId: data.newHostId } : prev);
+      addLog(createEventLog('info', 'Room host has changed'));
+    };
+
     socket.on('room-state-update', handleRoomState);
     socket.on('room-joined', handleRoomJoined);
     socket.on('game-started', handleGameStarted);
@@ -212,6 +238,9 @@ export function useTableSocketEvents({
     socket.on('runout-started', handleRunoutStarted);
     socket.on('runout-board', handleRunoutBoard);
     socket.on('next-game', handleNextGame);
+    socket.on('config-pending', handleConfigPending);
+    socket.on('config-applied', handleConfigApplied);
+    socket.on('host-changed', handleHostChanged);
 
     return () => {
       socket.off('room-state-update', handleRoomState);
@@ -230,6 +259,9 @@ export function useTableSocketEvents({
       socket.off('runout-started', handleRunoutStarted);
       socket.off('runout-board', handleRunoutBoard);
       socket.off('next-game', handleNextGame);
+      socket.off('config-pending', handleConfigPending);
+      socket.off('config-applied', handleConfigApplied);
+      socket.off('host-changed', handleHostChanged);
     };
   }, [
     socket,

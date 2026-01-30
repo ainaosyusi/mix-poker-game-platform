@@ -24,7 +24,8 @@ import type {
   SitDownRequest,
   Player as RoomPlayer,
   PlayerStatus,
-  ActionType
+  ActionType,
+  RoomConfig
 } from './types.js';
 import { RotationManager } from './RotationManager.js';
 import { MetaGameManager } from './MetaGameManager.js';
@@ -401,6 +402,19 @@ function scheduleNextHand(roomId: string, io: Server) {
       gameEngines.set(roomId, engine);
     }
 
+    // 保留設定を適用（次ハンド開始前）
+    if (currentRoom.pendingConfig) {
+      const applied = roomManager.applyPendingConfig(roomId);
+      if (applied) {
+        currentRoom.gameState.minRaise = currentRoom.config.bigBlind;
+        io.to(`room:${roomId}`).emit('config-applied', {
+          config: currentRoom.config,
+          rotation: currentRoom.rotation,
+          gameVariant: currentRoom.gameState.gameVariant,
+        });
+      }
+    }
+
     // ハンドを開始
     console.log(`🚀 Starting new hand for room ${roomId}...`);
     const success = engine.startHand(currentRoom);
@@ -440,8 +454,15 @@ function scheduleNextHand(roomId: string, io: Server) {
  * @param viewerSocketId 閲覧者のsocketId（この人には自分の手札が見える）
  */
 function sanitizeRoomForViewer(room: any, viewerSocketId?: string): any {
+  // パスワードをホスト以外に送信しない
+  const sanitizedConfig = { ...room.config };
+  if (room.hostId !== viewerSocketId) {
+    delete sanitizedConfig.password;
+  }
+
   return {
     ...room,
+    config: sanitizedConfig,
     players: room.players.map((p: any) => {
       if (!p) return null;
       const isOwnPlayer = viewerSocketId && p.socketId === viewerSocketId;
@@ -604,6 +625,19 @@ function handleRoomExit(
       socket.leave(`room:${roomId}`);
     }
     return;
+  }
+
+  // ホスト離脱時: 次のプレイヤーにホスト権限を移譲
+  if (room.hostId && room.hostId === socket.id) {
+    const nextHost = room.players.find((p: any) => p !== null && p.socketId !== socket.id);
+    if (nextHost) {
+      room.hostId = nextHost.socketId;
+      io.to(`room:${roomId}`).emit('host-changed', { newHostId: nextHost.socketId });
+      console.log(`👑 Host transferred to ${nextHost.name} in room ${roomId}`);
+    } else {
+      // 最後のプレイヤー → ルームは削除される
+      room.hostId = undefined;
+    }
   }
 
   const isInHand = room.gameState.status !== 'WAITING';
@@ -1997,6 +2031,251 @@ io.on('connection', (socket) => {
         gamesList: room.rotation.gamesList
       });
       broadcastRoomState(roomId, room, io);
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // ========== プライベートルーム機能 ==========
+
+  // プライベートルーム作成
+  socket.on('create-private-room', (data: {
+    config: {
+      maxPlayers?: number;
+      smallBlind?: number;
+      bigBlind?: number;
+      buyInMin?: number;
+      buyInMax?: number;
+      allowedGames?: string[];
+      timeLimit?: number;
+      studAnte?: number;
+    };
+    password?: string;
+    customRoomId?: string;
+  }) => {
+    try {
+      const user = socket.data?.user;
+      if (!user) {
+        socket.emit('error', { message: 'Authentication required' });
+        return;
+      }
+
+      // 既に別の部屋にいる場合は退出
+      const existingRoomId = getRoomIdFromSocket(socket);
+      if (existingRoomId) {
+        handleRoomExit(socket, existingRoomId, io);
+      }
+
+      const sb = data.config.smallBlind || 1;
+      const bb = data.config.bigBlind || 2;
+
+      const config: RoomConfig = {
+        maxPlayers: data.config.maxPlayers || 6,
+        smallBlind: sb,
+        bigBlind: bb,
+        buyInMin: data.config.buyInMin || bb * 50,
+        buyInMax: data.config.buyInMax || bb * 200,
+        allowedGames: data.config.allowedGames || ['NLH'],
+        timeLimit: data.config.timeLimit,
+        studAnte: data.config.studAnte,
+        password: data.password || undefined,
+      };
+
+      const room = roomManager.createRoom(socket.id, config, data.customRoomId);
+
+      // Socket.IOのルームに参加
+      socket.join(`room:${room.id}`);
+      (socket.data as any).roomId = room.id;
+      (socket.data as any).playerName = user.displayName;
+      socket.leave('lobby');
+
+      socket.emit('private-room-created', {
+        roomId: room.id,
+        room: sanitizeRoomForViewer(room, socket.id),
+        yourSocketId: socket.id,
+      });
+
+      console.log(`🔒 Private room created: ${room.id} by ${user.displayName}`);
+      logEvent('private_room_created', { roomId: room.id, playerName: user.displayName });
+
+    } catch (error: any) {
+      console.error(`❌ Create private room failed: ${error.message}`);
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // プライベートルーム参加
+  socket.on('join-private-room', (data: {
+    roomId: string;
+    password?: string;
+    buyIn: number;
+  }) => {
+    try {
+      const room = roomManager.getRoomById(data.roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Room not found' });
+        return;
+      }
+
+      // パスワード検証
+      if (!roomManager.validatePassword(data.roomId, data.password)) {
+        socket.emit('error', { message: 'Incorrect password' });
+        return;
+      }
+
+      // バイイン額チェック
+      if (!validateQuickJoinBuyIn(room, data.buyIn, socket)) {
+        return;
+      }
+
+      // 既に別の部屋にいる場合は退出
+      const existingRoomId = getRoomIdFromSocket(socket);
+      if (existingRoomId && existingRoomId !== data.roomId) {
+        handleRoomExit(socket, existingRoomId, io);
+      }
+
+      const user = socket.data?.user;
+      const playerName = user?.displayName || 'Guest';
+
+      removeExistingPlayerSession(room, socket, user, data.roomId);
+
+      // 空席を探す
+      const seatIndex = findRandomEmptySeat(room.players);
+      if (seatIndex === null) {
+        socket.emit('error', { message: 'Room is full' });
+        return;
+      }
+
+      (socket.data as any).playerName = playerName;
+      socket.join(`room:${data.roomId}`);
+      (socket.data as any).roomId = data.roomId;
+      socket.leave('lobby');
+
+      const player = createQuickJoinPlayer(socket, user, room, data.buyIn);
+      roomManager.sitDown(data.roomId, seatIndex, player);
+
+      console.log(`🔒 ${playerName} joined private room ${data.roomId} at seat ${seatIndex}`);
+      logEvent('private_room_join', { roomId: data.roomId, playerName, seatIndex, buyIn: data.buyIn });
+
+      // セッション追跡開始
+      if (user?.userId) {
+        startSession(socket.id, user.userId, data.roomId, room.gameState.gameVariant, data.buyIn);
+      }
+
+      socket.emit('room-joined', {
+        room: sanitizeRoomForViewer(room, socket.id),
+        yourSocketId: socket.id,
+        yourHand: null,
+      });
+      socket.emit('sit-down-success', { seatIndex });
+
+      broadcastRoomState(data.roomId, room, io);
+      scheduleNextHand(data.roomId, io);
+
+    } catch (error: any) {
+      console.error(`❌ Join private room failed: ${error.message}`);
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // プライベートルーム設定変更（遅延適用）
+  socket.on('update-private-room-config', (data: {
+    smallBlind?: number;
+    bigBlind?: number;
+    buyInMin?: number;
+    buyInMax?: number;
+    timeLimit?: number;
+    studAnte?: number;
+    gameVariant?: string;
+    rotation?: {
+      enabled?: boolean;
+      gamesList?: string[];
+      handsPerGame?: number;
+    };
+    password?: string;
+  }) => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) {
+        socket.emit('error', { message: 'You are not in any room' });
+        return;
+      }
+
+      const room = roomManager.getRoomById(roomId);
+      if (!room) {
+        socket.emit('error', { message: 'Room not found' });
+        return;
+      }
+
+      // ホストのみ変更可能
+      if (room.hostId !== socket.id) {
+        socket.emit('error', { message: 'Only the room host can change settings' });
+        return;
+      }
+
+      // パスワード変更は即座に適用（ゲームプレイに影響しない）
+      if (data.password !== undefined) {
+        room.config.password = data.password || undefined;
+      }
+
+      // ゲームが WAITING 状態なら即座に適用
+      if (room.gameState.status === 'WAITING') {
+        if (data.smallBlind !== undefined) room.config.smallBlind = data.smallBlind;
+        if (data.bigBlind !== undefined) room.config.bigBlind = data.bigBlind;
+        if (data.buyInMin !== undefined) room.config.buyInMin = data.buyInMin;
+        if (data.buyInMax !== undefined) room.config.buyInMax = data.buyInMax;
+        if (data.timeLimit !== undefined) room.config.timeLimit = data.timeLimit;
+        if (data.studAnte !== undefined) room.config.studAnte = data.studAnte;
+        if (data.gameVariant) {
+          room.gameState.gameVariant = data.gameVariant;
+          room.gameState.minRaise = room.config.bigBlind;
+        }
+        if (data.rotation) {
+          if (data.rotation.enabled !== undefined) room.rotation.enabled = data.rotation.enabled;
+          if (data.rotation.gamesList) {
+            room.rotation.gamesList = data.rotation.gamesList;
+            room.rotation.currentGameIndex = 0;
+            room.gameState.gameVariant = data.rotation.gamesList[0];
+          }
+          if (data.rotation.handsPerGame !== undefined) {
+            room.rotation.handsPerGame = data.rotation.handsPerGame;
+          }
+        }
+        room.pendingConfig = undefined;
+
+        broadcastRoomState(roomId, room, io);
+        io.to(`room:${roomId}`).emit('config-applied', {
+          config: room.config,
+          rotation: room.rotation,
+          gameVariant: room.gameState.gameVariant,
+        });
+        console.log(`⚙️  Room ${roomId}: Config updated immediately (WAITING state)`);
+        return;
+      }
+
+      // ゲーム中: 保留設定として保存
+      const pendingConfigChanges: Partial<RoomConfig> = {};
+      if (data.smallBlind !== undefined) pendingConfigChanges.smallBlind = data.smallBlind;
+      if (data.bigBlind !== undefined) pendingConfigChanges.bigBlind = data.bigBlind;
+      if (data.buyInMin !== undefined) pendingConfigChanges.buyInMin = data.buyInMin;
+      if (data.buyInMax !== undefined) pendingConfigChanges.buyInMax = data.buyInMax;
+      if (data.timeLimit !== undefined) pendingConfigChanges.timeLimit = data.timeLimit;
+      if (data.studAnte !== undefined) pendingConfigChanges.studAnte = data.studAnte;
+
+      room.pendingConfig = {
+        config: Object.keys(pendingConfigChanges).length > 0 ? pendingConfigChanges : undefined,
+        rotation: data.rotation,
+        gameVariant: data.gameVariant,
+        requestedBy: socket.id,
+        requestedAt: Date.now(),
+      };
+
+      io.to(`room:${roomId}`).emit('config-pending', {
+        pendingConfig: room.pendingConfig,
+        message: 'Settings will change after this hand',
+      });
+      console.log(`⏳ Room ${roomId}: Config change pending (game in progress)`);
+
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }

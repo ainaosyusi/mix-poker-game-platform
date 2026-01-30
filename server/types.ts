@@ -14,6 +14,7 @@ export interface RoomConfig {
     allowedGames?: string[];   // 許可されたゲーム一覧 ["NLH", "PLO", "2-7_TD", ...]
     timeLimit?: number;        // アクションタイムアウト（秒）
     studAnte?: number;         // Studゲームのアンティ（デフォルト: BB/5）
+    password?: string;         // プライベートルームのパスワード（任意）
 }
 
 export type GameVariant =
@@ -159,6 +160,20 @@ export interface MetaGameState {
     sevenDeuce: boolean;                // 7-2ゲームが有効かどうか
 }
 
+// ========== Pending Config Change (遅延適用) ==========
+
+export interface PendingConfigChange {
+    config?: Partial<RoomConfig>;              // 保留中のブラインド/バイイン変更
+    rotation?: {                               // 保留中のローテーション変更
+        enabled?: boolean;
+        gamesList?: string[];
+        handsPerGame?: number;
+    };
+    gameVariant?: string;                      // 保留中のゲームバリアント変更
+    requestedBy: string;                       // リクエスト者のsocketId
+    requestedAt: number;                       // リクエスト時刻
+}
+
 // ========== Room State (最重要) ==========
 
 export interface Room {
@@ -181,6 +196,9 @@ export interface Room {
 
     // サイドゲーム状態
     metaGame: MetaGameState;
+
+    // 保留設定（次ハンド開始時に適用）
+    pendingConfig?: PendingConfigChange;
 
     // メタ情報
     createdAt: number;                  // 部屋作成時刻（タイムスタンプ）

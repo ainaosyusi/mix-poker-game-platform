@@ -6,6 +6,7 @@
 import {
     Room,
     RoomConfig,
+    PendingConfigChange,
     Player,
     GameState,
     RotationState,
@@ -33,9 +34,9 @@ export class RoomManager {
             if (this.rooms.has(customRoomId)) {
                 throw new Error('Room ID already exists');
             }
-            // Private卓は6桁数字のみ、プリセットは任意の文字列
-            if (hostId && !/^\d{6}$/.test(customRoomId)) {
-                throw new Error('Room ID must be exactly 6 digits');
+            // Private卓は4-6桁数字、プリセットは任意の文字列
+            if (hostId && !/^\d{4,6}$/.test(customRoomId)) {
+                throw new Error('Room ID must be 4-6 digits');
             }
             roomId = customRoomId;
         } else if (hostId) {
@@ -207,6 +208,57 @@ export class RoomManager {
             this.deleteRoom(roomId);
         }
 
+        return true;
+    }
+
+    /**
+     * パスワード検証
+     */
+    validatePassword(roomId: string, password?: string): boolean {
+        const room = this.rooms.get(roomId);
+        if (!room) return false;
+        // パスワード未設定 = 誰でも参加可
+        if (!room.config.password) return true;
+        // パスワード設定済み = 一致が必要
+        return room.config.password === password;
+    }
+
+    /**
+     * 保留設定を適用（次ハンド開始前に呼び出す）
+     */
+    applyPendingConfig(roomId: string): boolean {
+        const room = this.rooms.get(roomId);
+        if (!room || !room.pendingConfig) return false;
+
+        const pending = room.pendingConfig;
+
+        // ブラインド/バイイン変更を適用
+        if (pending.config) {
+            Object.assign(room.config, pending.config);
+        }
+
+        // ローテーション変更を適用
+        if (pending.rotation) {
+            if (pending.rotation.enabled !== undefined) {
+                room.rotation.enabled = pending.rotation.enabled;
+            }
+            if (pending.rotation.gamesList) {
+                room.rotation.gamesList = pending.rotation.gamesList;
+                room.rotation.currentGameIndex = 0;
+            }
+            if (pending.rotation.handsPerGame !== undefined) {
+                room.rotation.handsPerGame = pending.rotation.handsPerGame;
+            }
+        }
+
+        // ゲームバリアント変更を適用
+        if (pending.gameVariant) {
+            room.gameState.gameVariant = pending.gameVariant;
+        }
+
+        // 保留設定をクリア
+        room.pendingConfig = undefined;
+        console.log(`⚙️  Applied pending config for room ${roomId}`);
         return true;
     }
 

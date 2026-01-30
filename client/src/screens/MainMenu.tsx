@@ -44,7 +44,7 @@ interface PlayerStats {
 
 interface MainMenuProps {
   user: AuthUser;
-  onNavigate: (view: 'roomSelect') => void;
+  onNavigate: (view: 'roomSelect' | 'privateRoom') => void;
   onLogout: () => void;
   onUserUpdate: (user: AuthUser) => void;
 }
@@ -463,18 +463,19 @@ export function MainMenu({ user, onNavigate, onLogout, onUserUpdate }: MainMenuP
         </button>
 
         <button
-          disabled
+          onClick={() => onNavigate('privateRoom')}
           style={{
-            padding: '24px', background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.06)', borderRadius: '16px',
-            color: 'rgba(255,255,255,0.3)', cursor: 'not-allowed', textAlign: 'left',
-            opacity: 0.5,
+            padding: '24px',
+            background: 'linear-gradient(135deg, rgba(168,85,247,0.2), rgba(139,92,246,0.2))',
+            border: '1px solid rgba(168,85,247,0.3)', borderRadius: '16px',
+            color: '#fff', cursor: 'pointer', textAlign: 'left',
+            transition: 'all 0.2s',
           }}
         >
           <div style={{ fontSize: '24px', marginBottom: '8px' }}>🔒</div>
           <div style={{ fontSize: '18px', fontWeight: 700 }}>Private Room</div>
-          <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.3)', marginTop: '4px' }}>
-            Coming Soon
+          <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.5)', marginTop: '4px' }}>
+            Create or join by room number
           </div>
         </button>
       </div>

@@ -5,10 +5,11 @@ import { AuthScreen } from './screens/AuthScreen';
 import type { AuthUser } from './screens/AuthScreen';
 import { MainMenu } from './screens/MainMenu';
 import { RoomSelect } from './screens/RoomSelect';
+import { PrivateRoom } from './screens/PrivateRoom';
 import { hasToken, apiGet, setToken, clearToken } from './api';
 import { CardPreferencesProvider } from './contexts/CardPreferencesContext';
 
-type ViewType = 'auth' | 'mainMenu' | 'roomSelect' | 'table';
+type ViewType = 'auth' | 'mainMenu' | 'roomSelect' | 'privateRoom' | 'table';
 
 function App() {
   const [currentView, setCurrentView] = useState<ViewType>('auth');
@@ -141,6 +142,14 @@ function App() {
 
       {currentView === 'roomSelect' && (
         <RoomSelect
+          socket={socketRef.current}
+          onJoinRoom={handleJoinRoom}
+          onBack={() => setCurrentView('mainMenu')}
+        />
+      )}
+
+      {currentView === 'privateRoom' && (
+        <PrivateRoom
           socket={socketRef.current}
           onJoinRoom={handleJoinRoom}
           onBack={() => setCurrentView('mainMenu')}
