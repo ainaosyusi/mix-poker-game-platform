@@ -176,6 +176,10 @@ export const PlayerSeat = memo(function PlayerSeat({
   // ゲームタイプ判定
   const isStudGame = ['7CS', '7CS8', 'RAZZ'].includes(gameVariant);
   const isDrawGame = ['2-7_TD', 'BADUGI'].includes(gameVariant);
+  const isPloGame = ['PLO', 'PLO8'].includes(gameVariant);
+
+  // ゲームタイプ別のカード枚数
+  const holeCardCount = isDrawGame ? 5 : isPloGame ? 4 : 2;
 
   // 空席
   if (!player) {
@@ -315,13 +319,13 @@ export const PlayerSeat = memo(function PlayerSeat({
             })
           ) : (
             // 伏せカード（他プレイヤー）
-            [...Array(isDrawGame ? 5 : 2)].map((_, i) => (
+            [...Array(holeCardCount)].map((_, i) => (
               <div
                 key={i}
                 style={{
                   transform: isDrawGame
                     ? `translateX(${i * -1}px)`
-                    : `rotate(${(i - 0.5) * 5}deg)`,
+                    : `rotate(${(i - (holeCardCount - 1) / 2) * 5}deg)`,
                   zIndex: i,
                   animation: cardDealAnimate ? `cardDealIn 0.4s ease-out ${i * 0.1}s both` : undefined,
                 }}

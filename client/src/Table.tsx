@@ -300,8 +300,8 @@ export function Table({
         </div>
       )}
 
-      {/* アクションパネル */}
-      {isSeated && !isWaiting && !showdownResult && !isSittingOut && (
+      {/* アクションパネル（ドローフェーズ中は非表示） */}
+      {isSeated && !isWaiting && !showdownResult && !isSittingOut && !isDrawPhase && (
         <ActionPanel
           validActions={validActions}
           currentBet={currentBetInfo.currentBet}
