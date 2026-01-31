@@ -12,6 +12,7 @@ import {
   getChipPosition,
   getChipPositionPortrait,
   getStudUpCardsPosition,
+  getStudUpCardsPositionPortrait,
   getDealerButtonPosition,
   getDealerButtonPositionPortrait,
 } from './seatPositionUtils';
@@ -287,30 +288,34 @@ export const PlayerSeat = memo(function PlayerSeat({
       )}
 
       {/* Stud用：ダウンカード（ネームタグ上部） - 自分のみ表示 */}
-      {isStudGame && isYou && holeCards && !isFolded && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: isPortrait ? '52%' : '58%',
-            display: 'flex',
-            gap: -8,
-            zIndex: 10,
-          }}
-        >
-          {/* 最初の2枚のダウンカードのみ表示 */}
-          {holeCards.slice(0, 2).map((card, i) => (
-            <div
-              key={i}
-              style={{
-                transform: `rotate(${(i - 0.5) * 5}deg)`,
-                zIndex: i,
-              }}
-            >
-              <Card card={card} size={cardSize} />
-            </div>
-          ))}
-        </div>
-      )}
+      {isStudGame && isYou && holeCards && !isFolded && (() => {
+        // ダウンカード = holeCards から upCards を除いたもの（2枚 + 7th street 1枚）
+        const upCardsSet = new Set(player.studUpCards || []);
+        const downCards = holeCards.filter(c => !upCardsSet.has(c));
+        return downCards.length > 0 ? (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: isPortrait ? '52%' : '58%',
+              display: 'flex',
+              gap: -8,
+              zIndex: 10,
+            }}
+          >
+            {downCards.map((card, i) => (
+              <div
+                key={i}
+                style={{
+                  transform: `rotate(${(i - (downCards.length - 1) / 2) * 5}deg)`,
+                  zIndex: i,
+                }}
+              >
+                <Card card={card} size={cardSize} />
+              </div>
+            ))}
+          </div>
+        ) : null;
+      })()}
 
       {/* Stud用：他プレイヤーのダウンカード（伏せ） */}
       {isStudGame && !isYou && !isFolded && (player.status === 'ACTIVE' || player.status === 'ALL_IN') && (
@@ -342,9 +347,11 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            ...getStudUpCardsPosition(seatIndex, maxPlayers),
+            ...(isPortrait
+              ? getStudUpCardsPositionPortrait(seatIndex, maxPlayers)
+              : getStudUpCardsPosition(seatIndex, maxPlayers)),
             display: 'flex',
-            gap: 2,
+            gap: isPortrait ? 1 : 2,
             zIndex: 15,
           }}
         >

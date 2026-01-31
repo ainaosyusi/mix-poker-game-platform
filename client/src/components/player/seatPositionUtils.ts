@@ -55,6 +55,32 @@ export function getStudUpCardsPosition(seatIndex: number, maxPlayers: 6 | 8): Re
   }
 }
 
+// ポートレート用Stud アップカード位置（縮小オフセット、重なり回避）
+export function getStudUpCardsPositionPortrait(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
+  if (maxPlayers === 6) {
+    switch (seatIndex) {
+      case 0: return { bottom: '100%', marginBottom: 10, left: '50%', transform: 'translateX(-50%)' };
+      case 1: return { bottom: '55%', right: '-40%' };
+      case 2: return { top: '55%', right: '-40%' };
+      case 3: return { top: '100%', marginTop: 10, left: '50%', transform: 'translateX(-50%)' };
+      case 4: return { top: '55%', left: '-40%' };
+      case 5: return { bottom: '55%', left: '-40%' };
+      default: return { bottom: '100%', marginBottom: 10, left: '50%', transform: 'translateX(-50%)' };
+    }
+  }
+  switch (seatIndex) {
+    case 0: return { bottom: '100%', marginBottom: 10, left: '50%', transform: 'translateX(-50%)' };
+    case 1: return { bottom: '40%', right: '-35%' };
+    case 2: return { top: '25%', right: '-40%' };
+    case 3: return { top: '40%', right: '-35%' };
+    case 4: return { top: '100%', marginTop: 10, left: '50%', transform: 'translateX(-50%)' };
+    case 5: return { top: '40%', left: '-35%' };
+    case 6: return { top: '25%', left: '-40%' };
+    case 7: return { bottom: '40%', left: '-35%' };
+    default: return { bottom: '100%', marginBottom: 10, left: '50%', transform: 'translateX(-50%)' };
+  }
+}
+
 // ポートレート用チップ位置（テーブル中心方向にオフセット縮小）
 export function getChipPositionPortrait(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
