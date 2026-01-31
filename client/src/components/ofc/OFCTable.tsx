@@ -96,6 +96,24 @@ export const OFCTable = memo(function OFCTable({
       ]
     : [];
 
+  // Lobby state: first hand requires manual start
+  const isLobby = !ofcState || ofcState.phase === 'OFC_WAITING';
+  const seatedCount = room.players.filter(p => p !== null).length;
+  const canAddBot = isLobby && seatedCount < 3;
+  const canStartGame = isLobby && seatedCount >= 2;
+
+  const handleAddBot = useCallback(() => {
+    socket.emit('ofc-add-bot');
+  }, [socket]);
+
+  const handleRemoveBot = useCallback((seatIndex: number) => {
+    socket.emit('ofc-remove-bot', { seatIndex });
+  }, [socket]);
+
+  const handleStartGame = useCallback(() => {
+    socket.emit('ofc-start-game');
+  }, [socket]);
+
   return (
     <div style={{
       position: 'relative',
@@ -171,34 +189,145 @@ export const OFCTable = memo(function OFCTable({
         boxShadow: 'inset 0 0 30px rgba(0,0,0,0.3), 0 0 20px rgba(0,0,0,0.5)',
       }} />
 
-      {/* Center info (phase status) */}
+      {/* Center info / Lobby controls */}
       <div style={{
         position: 'absolute',
         top: '45%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
         textAlign: 'center',
-        zIndex: 5,
+        zIndex: 15,
       }}>
-        {ofcState?.phase === 'OFC_INITIAL_PLACING' && (
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>
-            Initial Placement
+        {isLobby ? (
+          /* ===== Lobby: Bot管理 + Start Game ===== */
+          <div style={{
+            background: 'rgba(0, 0, 0, 0.6)',
+            borderRadius: 12,
+            padding: 16,
+            border: '1px solid rgba(255,255,255,0.1)',
+            minWidth: 240,
+          }}>
+            <div style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: '#fff',
+              marginBottom: 12,
+            }}>
+              Pineapple OFC Lobby
+            </div>
+
+            {/* Seat list */}
+            <div style={{ marginBottom: 12 }}>
+              {Array.from({ length: 3 }).map((_, i) => {
+                const p = room.players[i];
+                const isBot = p?.socketId.startsWith('bot-');
+                const isYou = p?.socketId === yourSocketId;
+                return (
+                  <div key={i} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '5px 10px',
+                    marginBottom: 4,
+                    borderRadius: 6,
+                    background: p
+                      ? isYou ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.08)'
+                      : 'rgba(255,255,255,0.03)',
+                    border: p
+                      ? isYou ? '1px solid rgba(34,197,94,0.3)' : '1px solid rgba(255,255,255,0.1)'
+                      : '1px dashed rgba(255,255,255,0.15)',
+                  }}>
+                    <span style={{
+                      fontSize: 12,
+                      color: p ? (isYou ? '#22c55e' : '#fff') : 'rgba(255,255,255,0.3)',
+                    }}>
+                      Seat {i + 1}: {p ? p.name : 'Empty'}
+                      {isYou && ' (You)'}
+                    </span>
+                    {isBot && (
+                      <button
+                        onClick={() => handleRemoveBot(i)}
+                        style={{
+                          padding: '2px 8px',
+                          borderRadius: 4,
+                          border: '1px solid rgba(239,68,68,0.4)',
+                          background: 'rgba(239,68,68,0.15)',
+                          color: '#ef4444',
+                          fontSize: 10,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button
+                onClick={handleAddBot}
+                disabled={!canAddBot}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: 8,
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  background: canAddBot ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.05)',
+                  color: canAddBot ? '#93c5fd' : 'rgba(255,255,255,0.3)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: canAddBot ? 'pointer' : 'default',
+                }}
+              >
+                + Add Bot
+              </button>
+              <button
+                onClick={handleStartGame}
+                disabled={!canStartGame}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: canStartGame
+                    ? 'linear-gradient(135deg, #22c55e, #16a34a)'
+                    : 'rgba(255,255,255,0.1)',
+                  color: '#fff',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: canStartGame ? 'pointer' : 'default',
+                  opacity: canStartGame ? 1 : 0.4,
+                }}
+              >
+                Start Game
+              </button>
+            </div>
           </div>
-        )}
-        {ofcState?.phase === 'OFC_PINEAPPLE_PLACING' && (
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>
-            Pineapple Round {(ofcState.round || 1) - 1}
-          </div>
-        )}
-        {ofcState?.phase === 'OFC_SCORING' && (
-          <div style={{ fontSize: 13, color: '#fbbf24' }}>
-            Scoring...
-          </div>
-        )}
-        {(!ofcState || ofcState.phase === 'OFC_WAITING' || ofcState.phase === 'OFC_DONE') && (
-          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>
-            Waiting for next hand...
-          </div>
+        ) : (
+          /* ===== In-game phase display ===== */
+          <>
+            {ofcState?.phase === 'OFC_INITIAL_PLACING' && (
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>
+                Initial Placement
+              </div>
+            )}
+            {ofcState?.phase === 'OFC_PINEAPPLE_PLACING' && (
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>
+                Pineapple Round {(ofcState.round || 1) - 1}
+              </div>
+            )}
+            {ofcState?.phase === 'OFC_SCORING' && (
+              <div style={{ fontSize: 13, color: '#fbbf24' }}>
+                Scoring...
+              </div>
+            )}
+            {ofcState?.phase === 'OFC_DONE' && (
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>
+                Next hand starting...
+              </div>
+            )}
+          </>
         )}
       </div>
 

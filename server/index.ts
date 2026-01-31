@@ -359,6 +359,13 @@ function scheduleNextHand(roomId: string, io: Server) {
     return;
   }
 
+  // OFC初回は手動開始（Add Bot / Start Game ボタン）
+  // 2ハンド目以降（ofcState存在時）は自動開始
+  if (room.gameState.gameVariant === 'OFC' && !room.ofcState) {
+    console.log('⏳ OFC: Waiting for manual start (use Start Game button)');
+    return;
+  }
+
   // ACTIVEプレイヤー + pendingJoin(BB待ちでない)SIT_OUTプレイヤーを確認
   // pendingJoin && !waitingForBB のSIT_OUTプレイヤーはresetPlayersForNewHandでACTIVEになるのでカウントする
   const activePlayers = room.players.filter(p =>
@@ -378,10 +385,8 @@ function scheduleNextHand(roomId: string, io: Server) {
     }
   });
 
-  // OFCは人間1人でもBOTが埋めるので開始可能、通常ゲームは2人必要
-  const minPlayers = room.gameState.gameVariant === 'OFC' ? 1 : 2;
-  if (activePlayers.length < minPlayers) {
-    console.log(`⚠️  scheduleNextHand: NOT ENOUGH PLAYERS (< ${minPlayers}) - game cannot start`);
+  if (activePlayers.length < 2) {
+    console.log('⚠️  scheduleNextHand: NOT ENOUGH PLAYERS (< 2) - game cannot start');
     console.log('   → Waiting for more players or rebuy...');
     return;
   }
@@ -399,8 +404,7 @@ function scheduleNextHand(roomId: string, io: Server) {
       p !== null && p.stack > 0 && !p.pendingSitOut && !p.pendingLeave &&
       (p.status !== 'SIT_OUT' || (p.pendingJoin && !p.waitingForBB))
     );
-    const minReady = currentRoom.gameState.gameVariant === 'OFC' ? 1 : 2;
-    if (readyPlayers.length < minReady) return;
+    if (readyPlayers.length < 2) return;
 
     // GameEngineを取得または作成
     let engine = gameEngines.get(roomId);
@@ -2054,6 +2058,98 @@ io.on('connection', (socket) => {
 
       processOFCEvents(roomId, room, io, engine, events);
 
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // OFC Bot追加（手動）
+  socket.on('ofc-add-bot', () => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) return;
+      const room = roomManager.getRoomById(roomId);
+      if (!room || room.gameState.gameVariant !== 'OFC') return;
+      if (room.gameState.status !== 'WAITING') {
+        socket.emit('ofc-error', { reason: 'Cannot add bot during game' });
+        return;
+      }
+
+      const maxPlayers = Math.min(room.config.maxPlayers || 3, 3);
+      let added = false;
+      for (let i = 0; i < maxPlayers; i++) {
+        if (!room.players[i]) {
+          const botNum = room.players.filter((p: any) => p && p.socketId.startsWith('bot-')).length + 1;
+          room.players[i] = {
+            socketId: `bot-${room.id}-${i}`,
+            name: `Bot ${botNum}`,
+            stack: room.config.buyInMax || 400,
+            bet: 0,
+            totalBet: 0,
+            status: 'ACTIVE' as PlayerStatus,
+            hand: null,
+            disconnected: false,
+          };
+          added = true;
+          break;
+        }
+      }
+
+      if (added) {
+        broadcastRoomState(roomId, room, io);
+      } else {
+        socket.emit('ofc-error', { reason: 'No empty seats' });
+      }
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // OFC Bot削除（手動）
+  socket.on('ofc-remove-bot', (data: { seatIndex: number }) => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) return;
+      const room = roomManager.getRoomById(roomId);
+      if (!room || room.gameState.gameVariant !== 'OFC') return;
+      if (room.gameState.status !== 'WAITING') {
+        socket.emit('ofc-error', { reason: 'Cannot remove bot during game' });
+        return;
+      }
+
+      const seat = data.seatIndex;
+      if (seat >= 0 && seat < room.players.length &&
+          room.players[seat]?.socketId.startsWith('bot-')) {
+        room.players[seat] = null;
+        broadcastRoomState(roomId, room, io);
+      }
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // OFC手動ゲーム開始
+  socket.on('ofc-start-game', () => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) return;
+      const room = roomManager.getRoomById(roomId);
+      if (!room || room.gameState.gameVariant !== 'OFC') return;
+      if (room.gameState.status !== 'WAITING') {
+        socket.emit('ofc-error', { reason: 'Game already in progress' });
+        return;
+      }
+
+      const playerCount = room.players.filter((p: any) => p !== null).length;
+      if (playerCount < 2) {
+        socket.emit('ofc-error', { reason: 'Need at least 2 players' });
+        return;
+      }
+
+      startOFCHand(roomId, room, io);
+      console.log(`🎮 OFC game manually started in room ${roomId}`);
+      logEvent('ofc_manual_start', { roomId, playerCount });
+      incrementMetric('ofc_manual_start');
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }
