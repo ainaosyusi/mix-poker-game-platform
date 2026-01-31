@@ -59,8 +59,10 @@ export const PlayerSeat = memo(function PlayerSeat({
   orientation = 'landscape',
 }: PlayerSeatProps) {
   const isPortrait = orientation === 'portrait';
-  // ポートレート時、自分のカードはmediumサイズ
-  const cardSize: 'tiny' | 'small' | 'medium' | 'large' = isPortrait && isYou ? 'medium' : 'small';
+  // ポートレート時: 自分=small, 他人=tiny / ランドスケープ: 全員small
+  const cardSize: 'tiny' | 'small' | 'medium' | 'large' = isPortrait
+    ? (isYou ? 'small' : 'tiny')
+    : 'small';
   const isFolded = player?.status === 'FOLDED';
   const isAllIn = player?.status === 'ALL_IN';
 
@@ -141,19 +143,19 @@ export const PlayerSeat = memo(function PlayerSeat({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '8px 16px',
+            gap: isPortrait ? 5 : 8,
+            padding: isPortrait ? '5px 10px' : '8px 16px',
             background: 'rgba(17, 24, 39, 0.8)',
             backdropFilter: 'blur(8px)',
             borderRadius: 999,
             border: '2px dashed #4b5563',
-            minWidth: 120,
+            minWidth: isPortrait ? 90 : 120,
           }}
         >
           <div
             style={{
-              width: 32,
-              height: 32,
+              width: isPortrait ? 24 : 32,
+              height: isPortrait ? 24 : 32,
               borderRadius: '50%',
               background: '#374151',
               display: 'flex',
@@ -162,9 +164,9 @@ export const PlayerSeat = memo(function PlayerSeat({
               border: '1px solid #4b5563',
             }}
           >
-            <span style={{ color: '#6b7280', fontSize: 14 }}>+</span>
+            <span style={{ color: '#6b7280', fontSize: isPortrait ? 11 : 14 }}>+</span>
           </div>
-          <span style={{ color: '#9ca3af', fontSize: 12 }}>
+          <span style={{ color: '#9ca3af', fontSize: isPortrait ? 10 : 12 }}>
             Empty
           </span>
         </div>
@@ -235,7 +237,9 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            bottom: isDrawGame ? '68%' : '58%',
+            bottom: isPortrait
+              ? (isDrawGame ? '60%' : '52%')
+              : (isDrawGame ? '68%' : '58%'),
             display: 'flex',
             gap: isDrawGame ? -6 : -8,
             zIndex: 10,
@@ -287,7 +291,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            bottom: '58%',
+            bottom: isPortrait ? '52%' : '58%',
             display: 'flex',
             gap: -8,
             zIndex: 10,
@@ -313,7 +317,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div
           style={{
             position: 'absolute',
-            bottom: '58%',
+            bottom: isPortrait ? '52%' : '58%',
             display: 'flex',
             gap: -8,
             zIndex: 10,
@@ -358,8 +362,8 @@ export const PlayerSeat = memo(function PlayerSeat({
           position: 'relative',
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          padding: '6px 12px',
+          gap: isPortrait ? 5 : 8,
+          padding: isPortrait ? '4px 8px' : '6px 12px',
           background: 'rgba(17, 24, 39, 0.95)',
           backdropFilter: 'blur(8px)',
           borderRadius: 999,
@@ -374,7 +378,7 @@ export const PlayerSeat = memo(function PlayerSeat({
             ? '0 0 20px rgba(251, 191, 36, 0.4)'
             : '0 4px 20px rgba(0,0,0,0.4)',
           opacity: isFolded ? 0.5 : 1,
-          minWidth: 140,
+          minWidth: isPortrait ? 110 : 140,
           zIndex: 30,
         }}
       >
@@ -382,8 +386,8 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <div
             style={{
-              width: 36,
-              height: 36,
+              width: isPortrait ? 28 : 36,
+              height: isPortrait ? 28 : 36,
               borderRadius: '50%',
               background: 'linear-gradient(135deg, #374151 0%, #1f2937 100%)',
               display: 'flex',
@@ -393,7 +397,7 @@ export const PlayerSeat = memo(function PlayerSeat({
               overflow: 'hidden',
             }}
           >
-            <span style={{ fontSize: 16 }}>{isYou ? '👤' : '🎭'}</span>
+            <span style={{ fontSize: isPortrait ? 12 : 16 }}>{isYou ? '👤' : '🎭'}</span>
           </div>
         </div>
 
@@ -401,7 +405,7 @@ export const PlayerSeat = memo(function PlayerSeat({
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: isPortrait ? 10 : 11,
               color: '#d1d5db',
               fontWeight: 500,
               overflow: 'hidden',
@@ -413,11 +417,11 @@ export const PlayerSeat = memo(function PlayerSeat({
             }}
           >
             {player.name}
-            {isYou && <span style={{ color: '#10b981', fontSize: 9 }}>(you)</span>}
+            {isYou && <span style={{ color: '#10b981', fontSize: isPortrait ? 8 : 9 }}>(you)</span>}
           </div>
           <div
             style={{
-              fontSize: 13,
+              fontSize: isPortrait ? 11 : 13,
               color: '#ffffff',
               fontWeight: 'bold',
             }}

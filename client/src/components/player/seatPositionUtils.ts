@@ -59,25 +59,25 @@ export function getStudUpCardsPosition(seatIndex: number, maxPlayers: 6 | 8): Re
 export function getChipPositionPortrait(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
     switch (seatIndex) {
-      case 0: return { bottom: '100%', marginBottom: 30, left: '50%', transform: 'translateX(-50%)' };
-      case 1: return { bottom: '70%', right: '-50%' };
-      case 2: return { top: '70%', right: '-50%' };
-      case 3: return { top: '100%', marginTop: 30, left: '50%', transform: 'translateX(-50%)' };
-      case 4: return { top: '70%', left: '-50%' };
-      case 5: return { bottom: '70%', left: '-50%' };
-      default: return { top: '100%', marginTop: 30 };
+      case 0: return { bottom: '100%', marginBottom: 22, left: '50%', transform: 'translateX(-50%)' };
+      case 1: return { bottom: '60%', right: '-45%' };
+      case 2: return { top: '60%', right: '-45%' };
+      case 3: return { top: '100%', marginTop: 22, left: '50%', transform: 'translateX(-50%)' };
+      case 4: return { top: '60%', left: '-45%' };
+      case 5: return { bottom: '60%', left: '-45%' };
+      default: return { top: '100%', marginTop: 22 };
     }
   }
   switch (seatIndex) {
-    case 0: return { bottom: '100%', marginBottom: 30, left: '50%', transform: 'translateX(-50%)' };
-    case 1: return { bottom: '60%', right: '-45%' };
-    case 2: return { top: '50%', right: '-50%', transform: 'translateY(-50%)' };
-    case 3: return { top: '60%', right: '-45%' };
-    case 4: return { top: '100%', marginTop: 30, left: '50%', transform: 'translateX(-50%)' };
-    case 5: return { top: '60%', left: '-45%' };
-    case 6: return { top: '50%', left: '-50%', transform: 'translateY(-50%)' };
-    case 7: return { bottom: '60%', left: '-45%' };
-    default: return { top: '100%', marginTop: 30 };
+    case 0: return { bottom: '100%', marginBottom: 22, left: '50%', transform: 'translateX(-50%)' };
+    case 1: return { bottom: '55%', right: '-40%' };
+    case 2: return { top: '50%', right: '-45%', transform: 'translateY(-50%)' };
+    case 3: return { top: '55%', right: '-40%' };
+    case 4: return { top: '100%', marginTop: 22, left: '50%', transform: 'translateX(-50%)' };
+    case 5: return { top: '55%', left: '-40%' };
+    case 6: return { top: '50%', left: '-45%', transform: 'translateY(-50%)' };
+    case 7: return { bottom: '55%', left: '-40%' };
+    default: return { top: '100%', marginTop: 22 };
   }
 }
 

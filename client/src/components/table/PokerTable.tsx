@@ -85,9 +85,9 @@ export const PokerTable = memo(function PokerTable({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: isPortrait ? '8px' : '16px',
-        paddingBottom: isPortrait ? '40px' : '80px',
-        minHeight: isPortrait ? '60vh' : '55vh',
+        padding: isPortrait ? '4px' : '16px',
+        paddingBottom: isPortrait ? '30px' : '80px',
+        minHeight: isPortrait ? '50vh' : '55vh',
       }}
     >
       {/* 背景グラデーション */}
@@ -107,9 +107,9 @@ export const PokerTable = memo(function PokerTable({
         style={{
           position: 'relative',
           width: '100%',
-          maxWidth: isPortrait ? 430 : 1000,
-          maxHeight: isPortrait ? '70vh' : '65vh',
-          aspectRatio: isPortrait ? '1 / 1.5' : '2.1 / 1',
+          maxWidth: isPortrait ? 400 : 1000,
+          maxHeight: isPortrait ? '62vh' : '65vh',
+          aspectRatio: isPortrait ? '1 / 1.3' : '2.1 / 1',
         }}
       >
         {/* テーブル本体（楕円） */}
