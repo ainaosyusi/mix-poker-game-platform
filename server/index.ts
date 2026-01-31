@@ -359,11 +359,6 @@ function scheduleNextHand(roomId: string, io: Server) {
     return;
   }
 
-  // OFCルームの場合、プレイヤーチェック前にBOTを追加（人間が1人でも開始可能にする）
-  if (room.gameState.gameVariant === 'OFC') {
-    fillOFCBots(room);
-  }
-
   // ACTIVEプレイヤー + pendingJoin(BB待ちでない)SIT_OUTプレイヤーを確認
   // pendingJoin && !waitingForBB のSIT_OUTプレイヤーはresetPlayersForNewHandでACTIVEになるのでカウントする
   const activePlayers = room.players.filter(p =>
@@ -383,8 +378,10 @@ function scheduleNextHand(roomId: string, io: Server) {
     }
   });
 
-  if (activePlayers.length < 2) {
-    console.log('⚠️  scheduleNextHand: NOT ENOUGH PLAYERS (< 2) - game cannot start');
+  // OFCは人間1人でもBOTが埋めるので開始可能、通常ゲームは2人必要
+  const minPlayers = room.gameState.gameVariant === 'OFC' ? 1 : 2;
+  if (activePlayers.length < minPlayers) {
+    console.log(`⚠️  scheduleNextHand: NOT ENOUGH PLAYERS (< ${minPlayers}) - game cannot start`);
     console.log('   → Waiting for more players or rebuy...');
     return;
   }
@@ -402,7 +399,8 @@ function scheduleNextHand(roomId: string, io: Server) {
       p !== null && p.stack > 0 && !p.pendingSitOut && !p.pendingLeave &&
       (p.status !== 'SIT_OUT' || (p.pendingJoin && !p.waitingForBB))
     );
-    if (readyPlayers.length < 2) return;
+    const minReady = currentRoom.gameState.gameVariant === 'OFC' ? 1 : 2;
+    if (readyPlayers.length < minReady) return;
 
     // GameEngineを取得または作成
     let engine = gameEngines.get(roomId);
