@@ -18,6 +18,7 @@ interface TurnPayload {
 
 interface TableSocketOptions {
   socket: Socket | null;
+  yourSocketId: string;
   maxTimerSeconds: number;
   addLog: (entry: LogEntry) => void;
   setRoom: Dispatch<SetStateAction<Room | null>>;
@@ -43,6 +44,7 @@ interface TableSocketOptions {
 
 export function useTableSocketEvents({
   socket,
+  yourSocketId,
   maxTimerSeconds,
   addLog,
   setRoom,
@@ -62,6 +64,12 @@ export function useTableSocketEvents({
 
     const handleRoomState = (updatedRoom: Room) => {
       setRoom(updatedRoom);
+      // アクティブプレイヤーが自分でなければ isYourTurn をリセット
+      // タイマー切れや接続不良時の同時アクション防止
+      const activePlayer = updatedRoom.players[updatedRoom.activePlayerIndex];
+      if (!activePlayer || activePlayer.socketId !== yourSocketId) {
+        setIsYourTurn(false);
+      }
     };
 
     const handleRoomJoined = (data: { room: Room }) => {
@@ -72,6 +80,7 @@ export function useTableSocketEvents({
       setRoom(data.room);
       setYourHand(data.yourHand || []);
       setShowdownResult(null);
+      setIsYourTurn(false);
     };
 
     const handleYourTurn = (data: TurnPayload) => {
@@ -265,6 +274,7 @@ export function useTableSocketEvents({
     };
   }, [
     socket,
+    yourSocketId,
     maxTimerSeconds,
     addLog,
     setRoom,

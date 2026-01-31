@@ -40,9 +40,13 @@ import {
   startSession, recordAddOn, endSession,
   recordHandResult, migrateSession, hasActiveSession
 } from './stats/sessionTracker.js';
+import { OFCGameEngine } from './OFCGameEngine.js';
+import type { OFCPlacement } from './types.js';
+import { botPlaceInitial, botPlacePineapple, botPlaceFantasyland } from './OFCBot.js';
 
 // Phase 3-B: ゲームエンジンインスタンス（部屋ごとに管理）
 const gameEngines: Map<string, GameEngine> = new Map();
+const ofcEngines: Map<string, OFCGameEngine> = new Map();
 const showdownManager = new ShowdownManager();
 const actionValidator = new ActionValidator();
 const metaGameManager = new MetaGameManager();
@@ -415,6 +419,15 @@ function scheduleNextHand(roomId: string, io: Server) {
       }
     }
 
+    // OFC分岐: OFCゲームの場合は専用エンジンで開始
+    if (currentRoom.gameState.gameVariant === 'OFC') {
+      startOFCHand(roomId, currentRoom, io);
+      console.log(`🎮 Auto-started OFC game in room ${roomId}`);
+      logEvent('auto_start', { roomId, playerCount: readyPlayers.length, variant: 'OFC' });
+      incrementMetric('auto_start');
+      return;
+    }
+
     // ハンドを開始
     console.log(`🚀 Starting new hand for room ${roomId}...`);
     const success = engine.startHand(currentRoom);
@@ -460,9 +473,19 @@ function sanitizeRoomForViewer(room: any, viewerSocketId?: string): any {
     delete sanitizedConfig.password;
   }
 
+  // OFC公開状態を生成
+  let ofcPublicState = undefined;
+  if (room.ofcState) {
+    const ofcEngine = ofcEngines.get(room.id);
+    ofcPublicState = ofcEngine
+      ? ofcEngine.getPublicState(room, viewerSocketId)
+      : room.ofcState;
+  }
+
   return {
     ...room,
     config: sanitizedConfig,
+    ofcState: ofcPublicState,
     players: room.players.map((p: any) => {
       if (!p) return null;
       const isOwnPlayer = viewerSocketId && p.socketId === viewerSocketId;
@@ -506,6 +529,199 @@ function getRoomIdFromSocket(socket: any): string | null {
   const rooms = Array.from(socket.rooms) as string[];
   const roomEntry = rooms.find((r: string) => r.startsWith('room:'));
   return roomEntry ? roomEntry.slice(5) : null;
+}
+
+// ========================================
+// OFC (Open Face Chinese) Helper Functions
+// ========================================
+
+function getOFCEngine(roomId: string): OFCGameEngine {
+  let engine = ofcEngines.get(roomId);
+  if (!engine) {
+    engine = new OFCGameEngine();
+    ofcEngines.set(roomId, engine);
+  }
+  return engine;
+}
+
+/**
+ * OFCハンドを開始
+ * - BOTで空席を埋める
+ * - エンジンでカードを配布
+ * - 各プレイヤーに手札を送信
+ * - BOTは自動配置
+ */
+function startOFCHand(roomId: string, room: any, io: Server) {
+  const engine = getOFCEngine(roomId);
+
+  // BOTで空席を埋める（最大3人）
+  fillOFCBots(room);
+
+  // ハンド開始
+  const events = engine.startHand(room);
+
+  // イベント処理
+  for (const event of events) {
+    if (event.type === 'error') {
+      console.log(`❌ OFC start error: ${event.data.reason}`);
+      return;
+    }
+
+    if (event.type === 'deal') {
+      // 各プレイヤーに自分のカードを送信
+      const ofc = room.ofcState;
+      if (ofc) {
+        for (const p of ofc.players) {
+          const cards = engine.getPlayerCards(room, p.socketId);
+          if (!p.isBot) {
+            io.to(p.socketId).emit('ofc-deal', {
+              round: ofc.round,
+              yourCards: cards,
+              ofcState: engine.getPublicState(room, p.socketId),
+            });
+          }
+        }
+      }
+
+      // 全員にルーム状態更新
+      broadcastRoomState(roomId, room, io);
+
+      // BOTの自動配置をスケジュール
+      scheduleOFCBotActions(roomId, room, io, engine);
+    }
+  }
+}
+
+/**
+ * BOTで空席を埋める（OFCは最大3人）
+ */
+function fillOFCBots(room: any) {
+  const humanCount = room.players.filter((p: any) => p && !p.disconnected).length;
+  if (humanCount === 0) return;
+
+  const maxPlayers = Math.min(room.config.maxPlayers || 3, 3);
+  let botIndex = 1;
+
+  for (let i = 0; i < maxPlayers; i++) {
+    if (!room.players[i]) {
+      room.players[i] = {
+        socketId: `bot-${room.id}-${i}`,
+        name: `Bot ${botIndex}`,
+        stack: room.config.buyInMax || 400,
+        bet: 0,
+        totalBet: 0,
+        status: 'ACTIVE' as PlayerStatus,
+        hand: null,
+        disconnected: false,
+      };
+      botIndex++;
+    }
+  }
+}
+
+/**
+ * BOTの自動配置をスケジュール（遅延つき）
+ */
+function scheduleOFCBotActions(roomId: string, room: any, io: Server, engine: OFCGameEngine) {
+  const ofc = room.ofcState;
+  if (!ofc) return;
+
+  for (const player of ofc.players) {
+    if (!player.isBot) continue;
+    if (player.hasPlaced) continue;
+
+    // Mark as bot in OFC state
+    player.isBot = true;
+
+    // Random delay 0.5-1.5s
+    const delay = 500 + Math.random() * 1000;
+
+    setTimeout(() => {
+      const currentRoom = roomManager.getRoomById(roomId);
+      if (!currentRoom || !currentRoom.ofcState) return;
+
+      const currentPlayer = currentRoom.ofcState.players.find(
+        (p: any) => p.socketId === player.socketId
+      );
+      if (!currentPlayer || currentPlayer.hasPlaced) return;
+
+      let events;
+      if (currentRoom.ofcState.phase === 'OFC_INITIAL_PLACING') {
+        if (currentPlayer.isFantasyland && currentPlayer.fantasyCandidateCards) {
+          const { placements, discard } = botPlaceFantasyland(currentPlayer.fantasyCandidateCards);
+          events = engine.placeInitialCards(currentRoom, player.socketId, placements, discard);
+        } else {
+          const placements = botPlaceInitial(currentPlayer.currentCards);
+          events = engine.placeInitialCards(currentRoom, player.socketId, placements);
+        }
+      } else if (currentRoom.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
+        const { placements, discard } = botPlacePineapple(
+          currentPlayer.currentCards,
+          currentPlayer.board,
+        );
+        events = engine.placePineappleCards(currentRoom, player.socketId, placements, discard);
+      }
+
+      if (events) {
+        processOFCEvents(roomId, currentRoom, io, engine, events);
+      }
+    }, delay);
+  }
+}
+
+/**
+ * OFCエンジンイベントを処理してソケットに送信
+ */
+function processOFCEvents(roomId: string, room: any, io: Server, engine: OFCGameEngine, events: any[]) {
+  for (const event of events) {
+    switch (event.type) {
+      case 'placement-accepted':
+        broadcastRoomState(roomId, room, io);
+        break;
+
+      case 'round-complete':
+        // 各プレイヤーにボード状態を送信
+        io.to(`room:${roomId}`).emit('ofc-round-complete', event.data);
+        break;
+
+      case 'deal': {
+        // 新ラウンドのカードを各プレイヤーに送信
+        const ofc = room.ofcState;
+        if (ofc) {
+          for (const p of ofc.players) {
+            if (!p.isBot) {
+              const cards = engine.getPlayerCards(room, p.socketId);
+              io.to(p.socketId).emit('ofc-deal', {
+                round: ofc.round,
+                yourCards: cards,
+                ofcState: engine.getPublicState(room, p.socketId),
+              });
+            }
+          }
+        }
+        broadcastRoomState(roomId, room, io);
+        // 新ラウンドのBOTアクションをスケジュール
+        scheduleOFCBotActions(roomId, room, io, engine);
+        break;
+      }
+
+      case 'scoring':
+        io.to(`room:${roomId}`).emit('ofc-scoring', event.data);
+        break;
+
+      case 'hand-complete':
+        broadcastRoomState(roomId, room, io);
+        // 次のハンドをスケジュール
+        setTimeout(() => {
+          scheduleNextHand(roomId, io);
+        }, HAND_END_DELAY_MS + 3000); // スコア表示のための追加遅延
+        break;
+
+      case 'error':
+        console.warn(`OFC error: ${event.data.reason}`);
+        break;
+    }
+  }
 }
 
 function shouldAutoFold(
@@ -1786,6 +2002,55 @@ io.on('connection', (socket) => {
       const room = roomManager.getRoomById(roomId);
       if (!room) return;
       socket.emit('room-state-update', sanitizeRoomForViewer(room, socket.id));
+    } catch (error: any) {
+      socket.emit('error', { message: error.message });
+    }
+  });
+
+  // ========== OFC (Open Face Chinese) ==========
+
+  // OFCカード配置
+  socket.on('ofc-place-cards', (data: {
+    placements: OFCPlacement[];
+    discardCard?: string;
+  }) => {
+    try {
+      const roomId = getRoomIdFromSocket(socket);
+      if (!roomId) {
+        socket.emit('error', { message: 'You are not in any room' });
+        return;
+      }
+      const room = roomManager.getRoomById(roomId);
+      if (!room || !room.ofcState) {
+        socket.emit('error', { message: 'No active OFC game' });
+        return;
+      }
+
+      const engine = getOFCEngine(roomId);
+      let events;
+
+      if (room.ofcState.phase === 'OFC_INITIAL_PLACING') {
+        events = engine.placeInitialCards(room, socket.id, data.placements, data.discardCard);
+      } else if (room.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
+        if (!data.discardCard) {
+          socket.emit('ofc-error', { reason: 'Must specify discard card for pineapple round' });
+          return;
+        }
+        events = engine.placePineappleCards(room, socket.id, data.placements, data.discardCard);
+      } else {
+        socket.emit('ofc-error', { reason: 'Not in a placing phase' });
+        return;
+      }
+
+      // エラーチェック
+      const errorEvent = events.find((e: any) => e.type === 'error');
+      if (errorEvent) {
+        socket.emit('ofc-error', errorEvent.data);
+        return;
+      }
+
+      processOFCEvents(roomId, room, io, engine, events);
+
     } catch (error: any) {
       socket.emit('error', { message: error.message });
     }

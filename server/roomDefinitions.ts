@@ -132,4 +132,32 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
             handsPerGame: 8,
         },
     },
+
+    // ========== OFC ルーム ==========
+    {
+        id: 'ofc-1-2',
+        displayName: 'OFC 1/2',
+        category: 'mix',
+        roomConfig: {
+            maxPlayers: 3,             // OFCは最大3人
+            smallBlind: 1,
+            bigBlind: 2,               // 1ポイント = 2チップ
+            buyInMin: 100,
+            buyInMax: 400,
+            allowedGames: ['OFC'],
+        },
+    },
+    {
+        id: 'ofc-2-5',
+        displayName: 'OFC 2/5',
+        category: 'mix',
+        roomConfig: {
+            maxPlayers: 3,
+            smallBlind: 2,
+            bigBlind: 5,
+            buyInMin: 250,
+            buyInMax: 1000,
+            allowedGames: ['OFC'],
+        },
+    },
 ];

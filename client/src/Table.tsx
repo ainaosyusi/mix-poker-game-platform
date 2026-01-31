@@ -20,6 +20,7 @@ import { useOrientation } from './hooks/useOrientation';
 import { useSyncYourHand } from './hooks/useSyncYourHand';
 import { useGameActions } from './hooks/useGameActions';
 import { HostControlsPanel } from './components/HostControlsPanel';
+import { OFCTable } from './components/ofc/OFCTable';
 import type {
   Room,
   ActionType,
@@ -36,6 +37,7 @@ const GAME_VARIANT_NAMES: Record<string, string> = {
   '7CS8': '7 Card Stud Hi-Lo',
   RAZZ: 'Razz',
   BADUGI: 'Badugi',
+  OFC: 'Pineapple OFC',
 };
 const DRAW_MAX_BY_VARIANT: Record<string, number> = {
   '2-7_TD': 5,
@@ -109,6 +111,7 @@ export function Table({
 
   useTableSocketEvents({
     socket,
+    yourSocketId,
     maxTimerSeconds,
     addLog,
     setRoom,
@@ -188,6 +191,18 @@ export function Table({
   const maxPlayers = (room.config.maxPlayers as 6 | 8) || 6;
   const isHost = room.hostId === yourSocketId;
   const isPrivateRoom = !!room.hostId;
+
+  // OFCゲームの場合は専用テーブルをレンダリング
+  if (room.gameState.gameVariant === 'OFC' && socket) {
+    return (
+      <OFCTable
+        socket={socket}
+        room={room}
+        yourSocketId={yourSocketId}
+        onLeaveRoom={onLeaveRoom}
+      />
+    );
+  }
 
   return (
     <div className="table-page">

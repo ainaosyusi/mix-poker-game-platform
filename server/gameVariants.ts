@@ -15,7 +15,8 @@ export type HandEvaluation =
     | 'badacey'     // バダシー (Badugi + A-5 スプリット)
     | 'archie'      // アーチー (A-5 + 2-7 スプリット)
     | 'razzdugi'    // ラズドゥーギ (Razz + Badugi スプリット)
-    | 'stud27';     // スタッド2-7 (7枚からベスト2-7)
+    | 'stud27'      // スタッド2-7 (7枚からベスト2-7)
+    | 'ofc';        // OFC (Open Face Chinese)
 
 export interface GameVariantConfig {
     id: string;                    // "NLH", "PLO", "2-7_TD", "7CS"
@@ -184,7 +185,21 @@ export const GAME_VARIANTS: Record<string, GameVariantConfig> = {
         maxDrawCount: 4,
         drawRounds: 3,
         streets: ['Pre-Draw', 'First Draw', 'Second Draw', 'Third Draw']
-    }
+    },
+
+    // Pineapple OFC (Open Face Chinese)
+    'OFC': {
+        id: 'OFC',
+        name: 'Pineapple OFC',
+        holeCardCount: 5,               // 初期配布5枚
+        communityCardType: 'none',
+        betStructure: 'no-limit',        // スコアリング制（ベッティングなし）
+        hasButton: true,
+        hasDrawPhase: false,
+        handEvaluatorType: 'high',
+        handEvaluation: 'ofc',
+        streets: ['Initial', 'Pineapple 1', 'Pineapple 2', 'Pineapple 3', 'Pineapple 4'],
+    },
 };
 
 /**

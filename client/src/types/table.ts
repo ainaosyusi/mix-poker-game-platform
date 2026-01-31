@@ -21,7 +21,7 @@ export interface Player {
 
 // ゲーム状態
 export interface GameState {
-  status: 'WAITING' | 'PLAYING' | 'PAUSED';
+  status: 'WAITING' | 'PLAYING' | 'PAUSED' | 'OFC_INITIAL_PLACING' | 'OFC_PINEAPPLE_PLACING' | 'OFC_SCORING';
   gameVariant: string;
   pot: {
     main: number;
@@ -86,6 +86,7 @@ export interface Room {
   rotation: RotationState;
   metaGame: MetaGameState;
   pendingConfig?: PendingConfigChange;
+  ofcState?: OFCPublicState;
 }
 
 // アクションタイプ
@@ -159,6 +160,55 @@ export interface CardProps {
   size?: 'tiny' | 'small' | 'medium' | 'large';
   faceDown?: boolean;
   className?: string;
+}
+
+// ========================================
+// OFC (Open Face Chinese) Types
+// ========================================
+
+export interface OFCRow {
+  top: string[];
+  middle: string[];
+  bottom: string[];
+}
+
+export interface OFCPlayerInfo {
+  socketId: string;
+  name: string;
+  stack: number;
+  board: OFCRow;
+  cardCount: number;       // 手持ちカード数（他人用）
+  hasPlaced: boolean;
+  isBot: boolean;
+  isFantasyland: boolean;
+  isFouled: boolean;
+}
+
+export interface OFCPublicState {
+  phase: 'OFC_WAITING' | 'OFC_INITIAL_PLACING' | 'OFC_PINEAPPLE_PLACING' | 'OFC_SCORING' | 'OFC_DONE';
+  round: number;
+  handNumber: number;
+  players: OFCPlayerInfo[];
+  scores: Record<string, number>;
+}
+
+export interface OFCRoundScore {
+  playerId: string;
+  playerName: string;
+  topHand: string;
+  middleHand: string;
+  bottomHand: string;
+  topRoyalties: number;
+  middleRoyalties: number;
+  bottomRoyalties: number;
+  totalPoints: number;
+  chipChange: number;
+  isFouled: boolean;
+}
+
+export interface OFCPlacement {
+  card: string;
+  row: 'top' | 'middle' | 'bottom';
 }
 
 // ベッティング構造タイプ

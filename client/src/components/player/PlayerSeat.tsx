@@ -351,7 +351,7 @@ export const PlayerSeat = memo(function PlayerSeat({
               ? getStudUpCardsPositionPortrait(seatIndex, maxPlayers)
               : getStudUpCardsPosition(seatIndex, maxPlayers)),
             display: 'flex',
-            gap: isPortrait ? 1 : 2,
+            gap: isPortrait ? -3 : -2,
             zIndex: 15,
           }}
         >

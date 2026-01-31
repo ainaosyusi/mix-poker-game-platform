@@ -12,6 +12,7 @@ export const GAME_OPTIONS = [
   { id: 'RAZZ', name: 'Razz' },
   { id: '2-7_TD', name: '2-7 TD' },
   { id: 'BADUGI', name: 'Badugi' },
+  { id: 'OFC', name: 'Pineapple OFC' },
 ] as const;
 
 export const BLIND_PRESETS = [

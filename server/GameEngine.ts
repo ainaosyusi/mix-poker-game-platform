@@ -533,6 +533,7 @@ export class GameEngine {
         for (const player of room.players) {
             if (player) {
                 player.bet = 0;
+                player.lastAction = undefined;
             }
         }
         room.gameState.currentBet = 0;

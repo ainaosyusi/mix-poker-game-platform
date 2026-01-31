@@ -62,7 +62,67 @@ export type GameVariant =
     | 'FL_BADACEY'         // Badacey Triple Draw
     | 'FL_ARCHIE'          // Archie Triple Draw
     | 'NL_5HI_SD'          // NL 5-Card Hi Single Draw
-    | 'PL_BADUGI';         // PL Badugi
+    | 'PL_BADUGI'          // PL Badugi
+    // OFC (Open Face Chinese)
+    | 'OFC';               // Pineapple OFC
+
+// ========== OFC (Open Face Chinese) Types ==========
+
+export interface OFCRow {
+    top: string[];         // 最大3枚
+    middle: string[];      // 最大5枚
+    bottom: string[];      // 最大5枚
+}
+
+export type OFCPhase =
+    | 'OFC_WAITING'
+    | 'OFC_INITIAL_PLACING'    // 初期5枚配置
+    | 'OFC_PINEAPPLE_PLACING'  // Pineapple 3枚→2配置1捨て
+    | 'OFC_SCORING'            // スコアリング
+    | 'OFC_DONE';              // ハンド完了
+
+export interface OFCPlayerState {
+    socketId: string;
+    name: string;
+    stack: number;
+    board: OFCRow;
+    currentCards: string[];       // 配置待ちカード
+    isFantasyland: boolean;
+    fantasyCandidateCards?: string[];  // FL時14枚
+    hasPlaced: boolean;
+    isBot: boolean;
+    isFouled: boolean;
+}
+
+export interface OFCGameState {
+    phase: OFCPhase;
+    round: number;                    // 1=初期, 2-5=Pineapple
+    players: OFCPlayerState[];
+    deck: string[];
+    handNumber: number;
+    fantasylandQueue: string[];       // 次ハンドFL突入者
+    scores: Record<string, number>;   // 累積ポイント
+    bigBlind: number;                 // チップ変換用
+}
+
+export interface OFCPlacement {
+    card: string;
+    row: 'top' | 'middle' | 'bottom';
+}
+
+export interface OFCRoundScore {
+    playerId: string;
+    playerName: string;
+    topHand: string;
+    middleHand: string;
+    bottomHand: string;
+    topRoyalties: number;
+    middleRoyalties: number;
+    bottomRoyalties: number;
+    totalPoints: number;
+    chipChange: number;
+    isFouled: boolean;
+}
 
 // ========== Pot State ==========
 
@@ -208,6 +268,9 @@ export interface Room {
     presetId?: string;                  // プリセットルームID (例: "nlh-1-2")
     displayName?: string;              // 表示名 (例: "NLH 1/2")
     category?: 'nlh' | 'mix';         // ルームカテゴリ
+
+    // OFC (Open Face Chinese) 専用状態
+    ofcState?: OFCGameState;
 }
 
 // ========== Socket Event Payloads ==========
@@ -305,6 +368,10 @@ export type GamePhase =
     | 'FIRST_DRAW'     // 1st Draw
     | 'SECOND_DRAW'    // 2nd Draw
     | 'THIRD_DRAW'     // 3rd Draw
+    // OFC フェーズ
+    | 'OFC_INITIAL_PLACING'    // OFC初期配置
+    | 'OFC_PINEAPPLE_PLACING'  // OFC Pineapple配置
+    | 'OFC_SCORING'            // OFCスコアリング
     | 'SHOWDOWN';    // ショーダウン
 
 // プレイヤーアクション

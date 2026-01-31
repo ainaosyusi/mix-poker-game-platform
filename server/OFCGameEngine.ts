@@ -1,0 +1,567 @@
+// ========================================
+// OFC Game Engine
+// Pineapple OFC - ゲーム進行管理
+// ========================================
+
+import type {
+    Room, OFCGameState, OFCPlayerState, OFCPlacement, OFCRow,
+    OFCPhase, OFCRoundScore,
+} from './types.js';
+import { calculateOFCScores, checkFoul, checkFantasylandEntry, checkFantasylandContinuation } from './OFCScoring.js';
+
+// ========================================
+// Deck Management
+// ========================================
+
+const SUITS = ['♠', '♥', '♦', '♣'];
+const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'];
+
+function createDeck(): string[] {
+    const deck: string[] = [];
+    for (const suit of SUITS) {
+        for (const rank of RANKS) {
+            deck.push(rank + suit);
+        }
+    }
+    // Fisher-Yates shuffle
+    for (let i = deck.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+    return deck;
+}
+
+function dealCards(deck: string[], count: number): string[] {
+    const cards: string[] = [];
+    for (let i = 0; i < count; i++) {
+        if (deck.length === 0) throw new Error('Deck is empty');
+        cards.push(deck.shift()!);
+    }
+    return cards;
+}
+
+// ========================================
+// OFC Game Engine Class
+// ========================================
+
+/** Callback events emitted by the engine */
+export interface OFCEngineEvent {
+    type: 'deal' | 'placement-accepted' | 'round-complete' | 'scoring' | 'hand-complete' | 'error';
+    data: any;
+}
+
+export class OFCGameEngine {
+
+    /**
+     * OFCハンドを開始
+     * - デッキ生成
+     * - 各プレイヤーに5枚配布（ファンタジーランドは14枚）
+     * - phase → OFC_INITIAL_PLACING
+     */
+    startHand(room: Room): OFCEngineEvent[] {
+        const events: OFCEngineEvent[] = [];
+        const players = room.players.filter(p => p && p.status !== 'SIT_OUT' && p.stack > 0);
+
+        if (players.length < 2) {
+            return [{ type: 'error', data: { reason: 'Need at least 2 players' } }];
+        }
+
+        const deck = createDeck();
+
+        // Determine which players are in fantasyland from previous hand
+        const prevOfc = room.ofcState;
+        const flQueue = prevOfc?.fantasylandQueue || [];
+
+        const ofcPlayers: OFCPlayerState[] = players.map(p => {
+            const isFL = flQueue.includes(p!.socketId);
+            const cardCount = isFL ? 14 : 5;
+            const cards = dealCards(deck, cardCount);
+
+            return {
+                socketId: p!.socketId,
+                name: p!.name,
+                stack: p!.stack,
+                board: { top: [], middle: [], bottom: [] },
+                currentCards: isFL ? [] : cards,
+                isFantasyland: isFL,
+                fantasyCandidateCards: isFL ? cards : undefined,
+                hasPlaced: false,
+                isBot: false,
+                isFouled: false,
+            };
+        });
+
+        const handNumber = (prevOfc?.handNumber || 0) + 1;
+
+        const ofcState: OFCGameState = {
+            phase: 'OFC_INITIAL_PLACING',
+            round: 1,
+            players: ofcPlayers,
+            deck,
+            handNumber,
+            fantasylandQueue: [],
+            scores: prevOfc?.scores || {},
+            bigBlind: room.config.bigBlind,
+        };
+
+        room.ofcState = ofcState;
+        room.gameState.status = 'OFC_INITIAL_PLACING';
+        room.gameState.gameVariant = 'OFC';
+        room.gameState.handNumber = handNumber;
+
+        events.push({
+            type: 'deal',
+            data: {
+                round: 1,
+                players: ofcPlayers.map(p => ({
+                    socketId: p.socketId,
+                    cardCount: p.isFantasyland
+                        ? p.fantasyCandidateCards!.length
+                        : p.currentCards.length,
+                    isFantasyland: p.isFantasyland,
+                })),
+            },
+        });
+
+        return events;
+    }
+
+    /**
+     * 初期5枚の配置処理
+     * placements: 5枚すべてをTop/Middle/Bottomに振り分け
+     *
+     * ファンタジーランドの場合: 14枚から13枚配置 + 1枚捨て
+     */
+    placeInitialCards(
+        room: Room,
+        socketId: string,
+        placements: OFCPlacement[],
+        discardCard?: string,
+    ): OFCEngineEvent[] {
+        const events: OFCEngineEvent[] = [];
+        const ofc = room.ofcState;
+        if (!ofc || ofc.phase !== 'OFC_INITIAL_PLACING') {
+            return [{ type: 'error', data: { reason: 'Not in initial placing phase' } }];
+        }
+
+        const player = ofc.players.find(p => p.socketId === socketId);
+        if (!player) {
+            return [{ type: 'error', data: { reason: 'Player not found' } }];
+        }
+        if (player.hasPlaced) {
+            return [{ type: 'error', data: { reason: 'Already placed cards' } }];
+        }
+
+        // Fantasyland: 14 cards → 13 placed + 1 discarded
+        if (player.isFantasyland) {
+            return this.placeFantasylandCards(room, player, placements, discardCard);
+        }
+
+        // Normal: exactly 5 cards
+        if (placements.length !== 5) {
+            return [{ type: 'error', data: { reason: 'Must place exactly 5 cards' } }];
+        }
+
+        // Validate that all placed cards are in hand
+        const handSet = new Set(player.currentCards);
+        for (const p of placements) {
+            if (!handSet.has(p.card)) {
+                return [{ type: 'error', data: { reason: `Card ${p.card} not in hand` } }];
+            }
+        }
+
+        // Validate row limits
+        if (!this.validateRowLimits(placements, player.board)) {
+            return [{ type: 'error', data: { reason: 'Row capacity exceeded' } }];
+        }
+
+        // Apply placements
+        this.applyPlacements(player, placements);
+        player.currentCards = [];
+        player.hasPlaced = true;
+
+        events.push({
+            type: 'placement-accepted',
+            data: { socketId, round: ofc.round },
+        });
+
+        // Check if all players have placed
+        if (ofc.players.every(p => p.hasPlaced)) {
+            const advanceEvents = this.advanceRound(room);
+            events.push(...advanceEvents);
+        }
+
+        return events;
+    }
+
+    /**
+     * ファンタジーランド: 14枚 → 13配置 + 1捨て
+     */
+    private placeFantasylandCards(
+        room: Room,
+        player: OFCPlayerState,
+        placements: OFCPlacement[],
+        discardCard?: string,
+    ): OFCEngineEvent[] {
+        const events: OFCEngineEvent[] = [];
+        const ofc = room.ofcState!;
+
+        if (placements.length !== 13 || !discardCard) {
+            return [{ type: 'error', data: { reason: 'FL: Must place 13 cards and discard 1' } }];
+        }
+
+        const allCards = player.fantasyCandidateCards!;
+        const allSet = new Set(allCards);
+
+        // Validate placements + discard
+        const usedCards = new Set<string>();
+        for (const p of placements) {
+            if (!allSet.has(p.card)) {
+                return [{ type: 'error', data: { reason: `Card ${p.card} not in FL hand` } }];
+            }
+            usedCards.add(p.card);
+        }
+        if (!allSet.has(discardCard) || usedCards.has(discardCard)) {
+            return [{ type: 'error', data: { reason: 'Invalid discard card' } }];
+        }
+        usedCards.add(discardCard);
+
+        if (usedCards.size !== 14) {
+            return [{ type: 'error', data: { reason: 'Must use all 14 cards' } }];
+        }
+
+        // Validate exact row counts: Top=3, Middle=5, Bottom=5
+        const topCount = placements.filter(p => p.row === 'top').length;
+        const midCount = placements.filter(p => p.row === 'middle').length;
+        const botCount = placements.filter(p => p.row === 'bottom').length;
+        if (topCount !== 3 || midCount !== 5 || botCount !== 5) {
+            return [{ type: 'error', data: { reason: 'FL: Must place Top:3, Middle:5, Bottom:5' } }];
+        }
+
+        // Apply placements
+        this.applyPlacements(player, placements);
+        player.fantasyCandidateCards = undefined;
+        player.currentCards = [];
+        player.hasPlaced = true;
+
+        events.push({
+            type: 'placement-accepted',
+            data: { socketId: player.socketId, round: ofc.round },
+        });
+
+        if (ofc.players.every(p => p.hasPlaced)) {
+            const advanceEvents = this.advanceRound(room);
+            events.push(...advanceEvents);
+        }
+
+        return events;
+    }
+
+    /**
+     * Pineappleラウンド: 3枚 → 2配置 + 1捨て
+     */
+    placePineappleCards(
+        room: Room,
+        socketId: string,
+        placements: OFCPlacement[],
+        discardCard: string,
+    ): OFCEngineEvent[] {
+        const events: OFCEngineEvent[] = [];
+        const ofc = room.ofcState;
+        if (!ofc || ofc.phase !== 'OFC_PINEAPPLE_PLACING') {
+            return [{ type: 'error', data: { reason: 'Not in pineapple placing phase' } }];
+        }
+
+        const player = ofc.players.find(p => p.socketId === socketId);
+        if (!player) {
+            return [{ type: 'error', data: { reason: 'Player not found' } }];
+        }
+        if (player.hasPlaced) {
+            return [{ type: 'error', data: { reason: 'Already placed this round' } }];
+        }
+
+        // FL player has already placed everything in initial phase
+        if (player.isFantasyland) {
+            player.hasPlaced = true;
+            events.push({
+                type: 'placement-accepted',
+                data: { socketId, round: ofc.round },
+            });
+
+            if (ofc.players.every(p => p.hasPlaced)) {
+                events.push(...this.advanceRound(room));
+            }
+            return events;
+        }
+
+        // Must place exactly 2 cards and discard 1
+        if (placements.length !== 2) {
+            return [{ type: 'error', data: { reason: 'Must place exactly 2 cards' } }];
+        }
+
+        const handSet = new Set(player.currentCards);
+        for (const p of placements) {
+            if (!handSet.has(p.card)) {
+                return [{ type: 'error', data: { reason: `Card ${p.card} not in hand` } }];
+            }
+        }
+        if (!handSet.has(discardCard)) {
+            return [{ type: 'error', data: { reason: 'Discard card not in hand' } }];
+        }
+
+        // Ensure all 3 cards are accounted for
+        const usedCards = new Set(placements.map(p => p.card));
+        usedCards.add(discardCard);
+        if (usedCards.size !== 3) {
+            return [{ type: 'error', data: { reason: 'Must use all 3 dealt cards' } }];
+        }
+
+        // Validate row limits
+        if (!this.validateRowLimits(placements, player.board)) {
+            return [{ type: 'error', data: { reason: 'Row capacity exceeded' } }];
+        }
+
+        // Apply
+        this.applyPlacements(player, placements);
+        player.currentCards = [];
+        player.hasPlaced = true;
+
+        events.push({
+            type: 'placement-accepted',
+            data: { socketId, round: ofc.round },
+        });
+
+        if (ofc.players.every(p => p.hasPlaced)) {
+            events.push(...this.advanceRound(room));
+        }
+
+        return events;
+    }
+
+    /**
+     * ラウンドを進行
+     * Round 1完了 → Round 2 (Pineapple) → ... → Round 5完了 → スコアリング
+     */
+    private advanceRound(room: Room): OFCEngineEvent[] {
+        const events: OFCEngineEvent[] = [];
+        const ofc = room.ofcState!;
+
+        events.push({
+            type: 'round-complete',
+            data: {
+                round: ofc.round,
+                players: ofc.players.map(p => ({
+                    socketId: p.socketId,
+                    board: p.board,
+                })),
+            },
+        });
+
+        if (ofc.round >= 5) {
+            // All rounds complete → scoring
+            return [...events, ...this.executeScoring(room)];
+        }
+
+        // Advance to next round
+        ofc.round += 1;
+        ofc.phase = 'OFC_PINEAPPLE_PLACING';
+        room.gameState.status = 'OFC_PINEAPPLE_PLACING';
+
+        // Deal 3 cards to non-FL players
+        for (const player of ofc.players) {
+            player.hasPlaced = false;
+
+            if (player.isFantasyland) {
+                // FL player already placed all 13 cards in round 1
+                player.hasPlaced = true;
+                continue;
+            }
+
+            const cards = dealCards(ofc.deck, 3);
+            player.currentCards = cards;
+        }
+
+        events.push({
+            type: 'deal',
+            data: {
+                round: ofc.round,
+                players: ofc.players.map(p => ({
+                    socketId: p.socketId,
+                    cardCount: p.isFantasyland ? 0 : p.currentCards.length,
+                    isFantasyland: p.isFantasyland,
+                })),
+            },
+        });
+
+        // If all FL players auto-placed, check if round is already done
+        if (ofc.players.every(p => p.hasPlaced)) {
+            events.push(...this.advanceRound(room));
+        }
+
+        return events;
+    }
+
+    /**
+     * スコアリング実行
+     */
+    private executeScoring(room: Room): OFCEngineEvent[] {
+        const events: OFCEngineEvent[] = [];
+        const ofc = room.ofcState!;
+
+        ofc.phase = 'OFC_SCORING';
+        room.gameState.status = 'OFC_SCORING';
+
+        // Check fouls
+        for (const player of ofc.players) {
+            player.isFouled = checkFoul(player.board);
+        }
+
+        // Calculate scores
+        const scores = calculateOFCScores(ofc.players, ofc.bigBlind);
+
+        // Apply chip changes to stacks
+        for (const score of scores) {
+            const player = ofc.players.find(p => p.socketId === score.playerId);
+            if (player) {
+                player.stack += score.chipChange;
+                if (player.stack < 0) player.stack = 0;
+
+                // Update room player stack too
+                const roomPlayer = room.players.find(p => p?.socketId === score.playerId);
+                if (roomPlayer) {
+                    roomPlayer.stack += score.chipChange;
+                    if (roomPlayer.stack < 0) roomPlayer.stack = 0;
+                }
+
+                // Accumulate scores
+                ofc.scores[score.playerId] = (ofc.scores[score.playerId] || 0) + score.totalPoints;
+            }
+        }
+
+        // Check fantasyland entry/continuation
+        const newFlQueue: string[] = [];
+        for (const player of ofc.players) {
+            if (player.isFantasyland) {
+                if (checkFantasylandContinuation(player.board, player.isFouled)) {
+                    newFlQueue.push(player.socketId);
+                }
+            } else {
+                if (checkFantasylandEntry(player.board, player.isFouled)) {
+                    newFlQueue.push(player.socketId);
+                }
+            }
+        }
+        ofc.fantasylandQueue = newFlQueue;
+
+        events.push({
+            type: 'scoring',
+            data: {
+                scores,
+                fantasylandPlayers: newFlQueue,
+            },
+        });
+
+        // Mark hand as complete
+        ofc.phase = 'OFC_DONE';
+        room.gameState.status = 'WAITING';
+
+        events.push({
+            type: 'hand-complete',
+            data: { handNumber: ofc.handNumber },
+        });
+
+        return events;
+    }
+
+    // ========================================
+    // Validation Helpers
+    // ========================================
+
+    /** Validate that placements don't exceed row limits */
+    private validateRowLimits(placements: OFCPlacement[], currentBoard: OFCRow): boolean {
+        const topNew = placements.filter(p => p.row === 'top').length;
+        const midNew = placements.filter(p => p.row === 'middle').length;
+        const botNew = placements.filter(p => p.row === 'bottom').length;
+
+        if (currentBoard.top.length + topNew > 3) return false;
+        if (currentBoard.middle.length + midNew > 5) return false;
+        if (currentBoard.bottom.length + botNew > 5) return false;
+
+        return true;
+    }
+
+    /** Apply placements to a player's board */
+    private applyPlacements(player: OFCPlayerState, placements: OFCPlacement[]): void {
+        for (const p of placements) {
+            switch (p.row) {
+                case 'top':
+                    player.board.top.push(p.card);
+                    break;
+                case 'middle':
+                    player.board.middle.push(p.card);
+                    break;
+                case 'bottom':
+                    player.board.bottom.push(p.card);
+                    break;
+            }
+        }
+    }
+
+    // ========================================
+    // Query Methods
+    // ========================================
+
+    /** Get a player's current cards (for sending to client) */
+    getPlayerCards(room: Room, socketId: string): string[] {
+        const ofc = room.ofcState;
+        if (!ofc) return [];
+
+        const player = ofc.players.find(p => p.socketId === socketId);
+        if (!player) return [];
+
+        if (player.isFantasyland && player.fantasyCandidateCards) {
+            return player.fantasyCandidateCards;
+        }
+        return player.currentCards;
+    }
+
+    /** Check if it's a given player's turn to place */
+    isPlayerTurn(room: Room, socketId: string): boolean {
+        const ofc = room.ofcState;
+        if (!ofc) return false;
+        if (ofc.phase !== 'OFC_INITIAL_PLACING' && ofc.phase !== 'OFC_PINEAPPLE_PLACING') {
+            return false;
+        }
+
+        const player = ofc.players.find(p => p.socketId === socketId);
+        return player ? !player.hasPlaced : false;
+    }
+
+    /** Get the public OFC state (hide other players' cards) */
+    getPublicState(room: Room, forSocketId?: string): any {
+        const ofc = room.ofcState;
+        if (!ofc) return null;
+
+        return {
+            phase: ofc.phase,
+            round: ofc.round,
+            handNumber: ofc.handNumber,
+            players: ofc.players.map(p => ({
+                socketId: p.socketId,
+                name: p.name,
+                stack: p.stack,
+                board: p.board,
+                cardCount: p.isFantasyland
+                    ? (p.fantasyCandidateCards?.length || 0)
+                    : p.currentCards.length,
+                hasPlaced: p.hasPlaced,
+                isBot: p.isBot,
+                isFantasyland: p.isFantasyland,
+                isFouled: ofc.phase === 'OFC_SCORING' || ofc.phase === 'OFC_DONE'
+                    ? p.isFouled
+                    : false,
+            })),
+            scores: ofc.scores,
+        };
+    }
+}
