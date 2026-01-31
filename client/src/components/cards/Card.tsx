@@ -132,13 +132,15 @@ export const Card = memo(function Card({
       overflow: 'hidden',
       transition: animate ? 'transform 0.2s' : undefined,
     }}>
-      {/* 左上コーナー */}
-      <div style={{ ...cornerStyle, top: s.padding, left: s.padding }}>
-        <span style={rankTextStyle}>{rankDisplay}</span>
-        <span style={suitTextStyle}>{sc.symbol}</span>
-      </div>
+      {/* 左上コーナー（エースは中央スートのみなので非表示） */}
+      {!isAce(rank) && (
+        <div style={{ ...cornerStyle, top: s.padding, left: s.padding }}>
+          <span style={rankTextStyle}>{rankDisplay}</span>
+          <span style={suitTextStyle}>{sc.symbol}</span>
+        </div>
+      )}
 
-      {/* 中央: 絵札とエースは枠で囲んで縮小表示、数字カードは空にする */}
+      {/* 中央 */}
       <div style={{
         position: 'absolute',
         top: '50%', left: '50%',
@@ -149,7 +151,7 @@ export const Card = memo(function Card({
         alignItems: 'center',
         width: isPictureOrAce ? centerFrameW : '100%',
         height: isPictureOrAce ? centerFrameH : '100%',
-        border: isPictureOrAce ? `${s.borderWidth}px solid ${sc.color}` : 'none',
+        border: isFaceCard(rank) ? `${s.borderWidth}px solid ${sc.color}` : 'none',
         borderRadius: s.borderRadius / 1.5,
         backgroundColor: isPictureOrAce ? '#ffffff' : 'transparent',
         zIndex: 1,
@@ -166,11 +168,13 @@ export const Card = memo(function Card({
         )}
       </div>
 
-      {/* 右下コーナー（反転） */}
-      <div style={{ ...cornerStyle, bottom: s.padding, right: s.padding, transform: 'rotate(180deg)' }}>
-        <span style={rankTextStyle}>{rankDisplay}</span>
-        <span style={suitTextStyle}>{sc.symbol}</span>
-      </div>
+      {/* 右下コーナー（エースは非表示） */}
+      {!isAce(rank) && (
+        <div style={{ ...cornerStyle, bottom: s.padding, right: s.padding, transform: 'rotate(180deg)' }}>
+          <span style={rankTextStyle}>{rankDisplay}</span>
+          <span style={suitTextStyle}>{sc.symbol}</span>
+        </div>
+      )}
     </div>
   );
 });
