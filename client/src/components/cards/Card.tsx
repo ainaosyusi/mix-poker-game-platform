@@ -17,6 +17,9 @@ const getRankDisplay = (rank: string): string => {
 // 絵札（J, Q, K）判定
 const isFaceCard = (rank: string): boolean => rank === 'J' || rank === 'Q' || rank === 'K';
 
+// エース（A）判定
+const isAce = (rank: string): boolean => rank === 'A';
+
 // カードをパース
 function parseCard(card: string): { rank: string; suit: string } {
   if (card.length === 2) {
@@ -28,21 +31,22 @@ function parseCard(card: string): { rank: string; suit: string } {
   return { rank: card[0], suit: card.slice(1) };
 }
 
-// サイズの設定（拡大 + フォントサイズ大幅増）
+// サイズの設定（指示に基づきランク・スートを拡大、パディングを縮小）
 const CARD_SIZES: Record<string, {
   width: number; height: number;
   rankSize: number; cornerSuitSize: number; centerSize: number;
   padding: number; borderRadius: number;
+  borderWidth: number; // 中央枠の太さ
 }> = {
-  tiny:   { width: 32,  height: 46,  rankSize: 13, cornerSuitSize: 9,  centerSize: 18, padding: 3, borderRadius: 5 },
-  small:  { width: 44,  height: 62,  rankSize: 16, cornerSuitSize: 11, centerSize: 24, padding: 4, borderRadius: 6 },
-  medium: { width: 60,  height: 84,  rankSize: 20, cornerSuitSize: 14, centerSize: 32, padding: 5, borderRadius: 7 },
-  large:  { width: 74,  height: 104, rankSize: 24, cornerSuitSize: 16, centerSize: 40, padding: 6, borderRadius: 8 },
+  tiny:   { width: 36,  height: 50,  rankSize: 18, cornerSuitSize: 12, centerSize: 14, padding: 2, borderRadius: 4, borderWidth: 1 },
+  small:  { width: 50,  height: 70,  rankSize: 25, cornerSuitSize: 17, centerSize: 20, padding: 2.5, borderRadius: 5, borderWidth: 1 },
+  medium: { width: 64,  height: 88,  rankSize: 32, cornerSuitSize: 22, centerSize: 26, padding: 3, borderRadius: 6, borderWidth: 1.5 },
+  large:  { width: 80,  height: 112, rankSize: 40, cornerSuitSize: 28, centerSize: 34, padding: 4, borderRadius: 8, borderWidth: 2 },
 };
 
 // カードサイズに応じたオーバーラップ量
 const OVERLAP: Record<string, number> = {
-  tiny: -6, small: -10, medium: -12, large: -14,
+  tiny: -8, small: -12, medium: -16, large: -20,
 };
 
 export const Card = memo(function Card({
@@ -82,88 +86,85 @@ export const Card = memo(function Card({
   const { rank, suit } = parseCard(card);
   const sc = suitConfig[suit] || suitConfig['s'];
   const rankDisplay = getRankDisplay(rank);
+  const isPictureOrAce = isFaceCard(rank) || isAce(rank);
+
+  // コーナーの共通スタイル
+  const cornerStyle: React.CSSProperties = {
+    position: 'absolute',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    lineHeight: 0.9,
+    zIndex: 2,
+  };
+
+  // ランク文字のスタイル（太く、大きく）
+  const rankTextStyle: React.CSSProperties = {
+    fontSize: s.rankSize,
+    fontWeight: 900,
+    color: sc.color,
+    fontFamily: 'Arial Black, "Helvetica Neue", Helvetica, sans-serif',
+    letterSpacing: -1,
+    textShadow: '0 1px 1px rgba(0,0,0,0.1)',
+  };
+
+  // スートのスタイル
+  const suitTextStyle: React.CSSProperties = {
+    fontSize: s.cornerSuitSize,
+    color: sc.color,
+    marginTop: 0,
+  };
 
   return (
     <div style={{
       width: s.width, height: s.height,
-      background: `linear-gradient(145deg, #ffffff 0%, ${sc.bg.replace('0.08', '0.15')} 100%)`,
+      background: '#ffffff',
       borderRadius: s.borderRadius,
-      border: `1.5px solid ${sc.color}30`,
-      boxShadow: '0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.8)',
+      border: '1px solid #d0d0d0',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.15), 0 1px 1px rgba(0,0,0,0.1)',
       position: 'relative',
       userSelect: 'none',
       overflow: 'hidden',
       transition: animate ? 'transform 0.2s' : undefined,
     }}>
-      {/* 左上コーナー: ランク + スート縦積み */}
-      <div style={{
-        position: 'absolute',
-        top: s.padding,
-        left: s.padding + 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        lineHeight: 1,
-      }}>
-        <span style={{
-          fontSize: s.rankSize,
-          fontWeight: 800,
-          color: sc.color,
-          textShadow: '0 1px 1px rgba(0,0,0,0.08)',
-        }}>
-          {rankDisplay}
-        </span>
-        <span style={{
-          fontSize: s.cornerSuitSize,
-          color: sc.color,
-          marginTop: -1,
-        }}>
-          {sc.symbol}
-        </span>
+      {/* 左上コーナー */}
+      <div style={{ ...cornerStyle, top: s.padding, left: s.padding }}>
+        <span style={rankTextStyle}>{rankDisplay}</span>
+        <span style={suitTextStyle}>{sc.symbol}</span>
       </div>
 
-      {/* 中央: 絵札はイラスト、その他はスートウォーターマーク */}
+      {/* 中央: 絵札とエースは枠で囲んで縮小表示、数字カードは空にする */}
       <div style={{
         position: 'absolute',
         top: '50%', left: '50%',
         transform: 'translate(-50%, -50%)',
         pointerEvents: 'none',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: isPictureOrAce ? s.width - (s.padding * 3 + s.rankSize) : '100%',
+        height: isPictureOrAce ? s.height - (s.padding * 3 + s.rankSize) : '100%',
+        border: isPictureOrAce ? `${s.borderWidth}px solid ${sc.color}` : 'none',
+        borderRadius: s.borderRadius / 1.5,
+        backgroundColor: isPictureOrAce ? '#ffffff' : 'transparent',
+        zIndex: 1,
+        boxSizing: 'border-box',
       }}>
         {isFaceCard(rank) ? (
-          <FaceCardIllustration rank={rank} color={sc.color} size={s.centerSize * 1.8} />
-        ) : (
-          <div style={{ fontSize: s.centerSize, color: sc.color, opacity: 0.15 }}>
+          <FaceCardIllustration rank={rank} color={sc.color} size={s.centerSize * 2} />
+        ) : isAce(rank) ? (
+          <div style={{ fontSize: s.centerSize * 2.5, color: sc.color }}>
             {sc.symbol}
           </div>
+        ) : (
+          null
         )}
       </div>
 
-      {/* 右下コーナー: ランク + スート縦積み（反転） */}
-      <div style={{
-        position: 'absolute',
-        bottom: s.padding,
-        right: s.padding + 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        lineHeight: 1,
-        transform: 'rotate(180deg)',
-      }}>
-        <span style={{
-          fontSize: s.rankSize,
-          fontWeight: 800,
-          color: sc.color,
-          textShadow: '0 1px 1px rgba(0,0,0,0.08)',
-        }}>
-          {rankDisplay}
-        </span>
-        <span style={{
-          fontSize: s.cornerSuitSize,
-          color: sc.color,
-          marginTop: -1,
-        }}>
-          {sc.symbol}
-        </span>
+      {/* 右下コーナー（反転） */}
+      <div style={{ ...cornerStyle, bottom: s.padding, right: s.padding, transform: 'rotate(180deg)' }}>
+        <span style={rankTextStyle}>{rankDisplay}</span>
+        <span style={suitTextStyle}>{sc.symbol}</span>
       </div>
     </div>
   );
