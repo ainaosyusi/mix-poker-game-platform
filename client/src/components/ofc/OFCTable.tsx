@@ -98,8 +98,8 @@ export const OFCTable = memo(function OFCTable({
   const isPlacingPhase = ofcState?.phase === 'OFC_INITIAL_PLACING' || ofcState?.phase === 'OFC_PINEAPPLE_PLACING';
   const isPineapple = ofcState?.phase === 'OFC_PINEAPPLE_PLACING';
 
-  // In pineapple phase, only allow placement when it's your turn
-  const isMyTurn = !isPineapple || ofcState?.currentTurnSocketId === yourSocketId;
+  // 全ラウンド順番制: currentTurnSocketIdが自分の時だけ配置可能
+  const isMyTurn = ofcState?.currentTurnSocketId === yourSocketId || ofcState?.currentTurnSocketId == null;
   const canPlace = isPlacingPhase && myOFCPlayer && !myOFCPlayer.hasPlaced && yourCards.length > 0 && isMyTurn;
 
   // Sort players: you first, then others
@@ -332,6 +332,13 @@ export const OFCTable = memo(function OFCTable({
             {ofcState?.phase === 'OFC_INITIAL_PLACING' && (
               <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>
                 Initial Placement
+                {ofcState.currentTurnSocketId && (
+                  <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 2 }}>
+                    {ofcState.currentTurnSocketId === yourSocketId
+                      ? 'Your turn'
+                      : `${ofcState.players.find(p => p.socketId === ofcState.currentTurnSocketId)?.name || '...'}'s turn`}
+                  </div>
+                )}
               </div>
             )}
             {ofcState?.phase === 'OFC_PINEAPPLE_PLACING' && (
@@ -393,15 +400,15 @@ export const OFCTable = memo(function OFCTable({
               <span style={{
                 fontSize: 11,
                 fontWeight: 600,
-                color: isCurrentTurn && isPineapple
+                color: isCurrentTurn && isPlacingPhase
                   ? '#fbbf24'
                   : isYou ? '#22c55e' : '#fff',
-                background: isCurrentTurn && isPineapple
+                background: isCurrentTurn && isPlacingPhase
                   ? 'rgba(251,191,36,0.15)'
                   : 'rgba(0,0,0,0.5)',
                 padding: '2px 8px',
                 borderRadius: 4,
-                border: isCurrentTurn && isPineapple
+                border: isCurrentTurn && isPlacingPhase
                   ? '1px solid rgba(251,191,36,0.4)'
                   : 'none',
               }}>
@@ -436,7 +443,7 @@ export const OFCTable = memo(function OFCTable({
                 {player.stack.toLocaleString()} chips
                 {!player.hasPlaced && isPlacingPhase && (
                   <span style={{ color: '#fbbf24', marginLeft: 6 }}>
-                    {isCurrentTurn && isPineapple ? 'Turn' : 'Placing...'}
+                    {isCurrentTurn ? 'Turn' : 'Waiting'}
                   </span>
                 )}
                 {player.hasPlaced && isPlacingPhase && (
@@ -478,8 +485,8 @@ export const OFCTable = memo(function OFCTable({
         </div>
       )}
 
-      {/* Waiting for turn indicator (pineapple phase, not your turn) */}
-      {isPineapple && myOFCPlayer && !myOFCPlayer.hasPlaced && yourCards.length > 0 && !isMyTurn && (
+      {/* Waiting for turn indicator (any placing phase, not your turn) */}
+      {isPlacingPhase && myOFCPlayer && !myOFCPlayer.hasPlaced && yourCards.length > 0 && !isMyTurn && (
         <div style={{
           position: 'absolute',
           bottom: 20,

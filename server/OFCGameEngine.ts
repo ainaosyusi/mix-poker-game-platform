@@ -114,7 +114,7 @@ export class OFCGameEngine {
             scores: prevOfc?.scores || {},
             bigBlind: room.config.bigBlind,
             buttonIndex,
-            currentTurnIndex: -1, // 初期ラウンドは同時配置
+            currentTurnIndex: -1, // 一旦-1、下で設定
         };
 
         room.ofcState = ofcState;
@@ -122,10 +122,14 @@ export class OFCGameEngine {
         room.gameState.gameVariant = 'OFC';
         room.gameState.handNumber = handNumber;
 
+        // 全ラウンド順番制: ボタン左から順に配置
+        ofcState.currentTurnIndex = this.getNextUnplacedPlayer(ofcState);
+
         events.push({
             type: 'deal',
             data: {
                 round: 1,
+                currentTurnIndex: ofcState.currentTurnIndex,
                 players: ofcPlayers.map(p => ({
                     socketId: p.socketId,
                     cardCount: p.isFantasyland
@@ -157,12 +161,18 @@ export class OFCGameEngine {
             return [{ type: 'error', data: { reason: 'Not in initial placing phase' } }];
         }
 
-        const player = ofc.players.find(p => p.socketId === socketId);
+        const playerIndex = ofc.players.findIndex(p => p.socketId === socketId);
+        const player = playerIndex >= 0 ? ofc.players[playerIndex] : undefined;
         if (!player) {
             return [{ type: 'error', data: { reason: 'Player not found' } }];
         }
         if (player.hasPlaced) {
             return [{ type: 'error', data: { reason: 'Already placed cards' } }];
+        }
+
+        // 順番チェック（全ラウンド順番制）
+        if (ofc.currentTurnIndex >= 0 && ofc.currentTurnIndex !== playerIndex) {
+            return [{ type: 'error', data: { reason: 'Not your turn' } }];
         }
 
         // Fantasyland: 14 cards → 13 placed + 1 discarded
@@ -193,9 +203,12 @@ export class OFCGameEngine {
         player.currentCards = [];
         player.hasPlaced = true;
 
+        // ターンを次のプレイヤーに進める
+        ofc.currentTurnIndex = this.getNextUnplacedPlayer(ofc);
+
         events.push({
             type: 'placement-accepted',
-            data: { socketId, round: ofc.round },
+            data: { socketId, round: ofc.round, nextTurnIndex: ofc.currentTurnIndex },
         });
 
         // Check if all players have placed
@@ -575,8 +588,16 @@ export class OFCGameEngine {
             return false;
         }
 
-        const player = ofc.players.find(p => p.socketId === socketId);
-        return player ? !player.hasPlaced : false;
+        const playerIndex = ofc.players.findIndex(p => p.socketId === socketId);
+        if (playerIndex < 0) return false;
+        const player = ofc.players[playerIndex];
+        if (player.hasPlaced) return false;
+
+        // 順番制: currentTurnIndexと一致するか
+        if (ofc.currentTurnIndex >= 0) {
+            return ofc.currentTurnIndex === playerIndex;
+        }
+        return true;
     }
 
     /** Get the public OFC state (hide other players' cards) */

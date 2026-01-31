@@ -627,43 +627,14 @@ function fillOFCBots(room: any) {
 }
 
 /**
- * BOTの自動配置をスケジュール（初期ラウンド用 - 同時配置）
+ * BOTの自動配置をスケジュール（全ラウンド順番制: 現在ターンのBOTのみ）
  */
 function scheduleOFCBotActions(roomId: string, room: any, io: Server, engine: OFCGameEngine) {
-  const ofc = room.ofcState;
-  if (!ofc) return;
-
-  // 初期ラウンド: 全BOT同時配置
-  if (ofc.phase === 'OFC_INITIAL_PLACING') {
-    for (const player of ofc.players) {
-      if (!player.isBot || player.hasPlaced) continue;
-
-      const delay = 500 + Math.random() * 1000;
-      setTimeout(() => {
-        const currentRoom = roomManager.getRoomById(roomId);
-        if (!currentRoom || !currentRoom.ofcState) return;
-        const cp = currentRoom.ofcState.players.find((p: any) => p.socketId === player.socketId);
-        if (!cp || cp.hasPlaced) return;
-
-        let events;
-        if (cp.isFantasyland && cp.fantasyCandidateCards) {
-          const { placements, discard } = botPlaceFantasyland(cp.fantasyCandidateCards);
-          events = engine.placeInitialCards(currentRoom, player.socketId, placements, discard);
-        } else {
-          const placements = botPlaceInitial(cp.currentCards);
-          events = engine.placeInitialCards(currentRoom, player.socketId, placements);
-        }
-        if (events) processOFCEvents(roomId, currentRoom, io, engine, events);
-      }, delay);
-    }
-  } else {
-    // Pineappleラウンド: 現在ターンのBOTのみスケジュール
-    scheduleCurrentTurnBot(roomId, room, io, engine);
-  }
+  scheduleCurrentTurnBot(roomId, room, io, engine);
 }
 
 /**
- * Pineappleラウンド: 現在ターンがBOTならスケジュール
+ * 現在ターンがBOTならスケジュール（初期・Pineapple共通）
  */
 function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: OFCGameEngine) {
   const ofc = room.ofcState;
@@ -680,7 +651,17 @@ function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: O
     if (!cp || !cp.isBot || cp.hasPlaced) return;
 
     let events;
-    if (currentRoom.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
+    if (currentRoom.ofcState.phase === 'OFC_INITIAL_PLACING') {
+      // 初期ラウンド: 5枚配置 (FL時は14枚→13枚+1捨て)
+      if (cp.isFantasyland && cp.fantasyCandidateCards) {
+        const { placements, discard } = botPlaceFantasyland(cp.fantasyCandidateCards);
+        events = engine.placeInitialCards(currentRoom, cp.socketId, placements, discard);
+      } else {
+        const placements = botPlaceInitial(cp.currentCards);
+        events = engine.placeInitialCards(currentRoom, cp.socketId, placements);
+      }
+    } else if (currentRoom.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
+      // Pineappleラウンド: 3枚→2枚配置+1捨て
       const { placements, discard } = botPlacePineapple(cp.currentCards, cp.board);
       events = engine.placePineappleCards(currentRoom, cp.socketId, placements, discard);
     }
@@ -709,8 +690,8 @@ function processOFCEvents(roomId: string, room: any, io: Server, engine: OFCGame
     switch (event.type) {
       case 'placement-accepted':
         broadcastRoomState(roomId, room, io);
-        // Pineappleラウンドで次のターンがBOTならスケジュール
-        if (room.ofcState?.phase === 'OFC_PINEAPPLE_PLACING') {
+        // 次のターンがBOTならスケジュール（全ラウンド共通）
+        if (room.ofcState?.phase === 'OFC_INITIAL_PLACING' || room.ofcState?.phase === 'OFC_PINEAPPLE_PLACING') {
           scheduleCurrentTurnBot(roomId, room, io, engine);
         }
         break;
