@@ -132,13 +132,11 @@ export const Card = memo(function Card({
       overflow: 'hidden',
       transition: animate ? 'transform 0.2s' : undefined,
     }}>
-      {/* 左上コーナー（Aceは中央スートのみなのでコーナー非表示） */}
-      {!isAce(rank) && (
-        <div style={{ ...cornerStyle, top: s.padding, left: s.padding }}>
-          <span style={rankTextStyle}>{rankDisplay}</span>
-          <span style={suitTextStyle}>{sc.symbol}</span>
-        </div>
-      )}
+      {/* 左上コーナー */}
+      <div style={{ ...cornerStyle, top: s.padding, left: s.padding }}>
+        <span style={rankTextStyle}>{rankDisplay}</span>
+        {!isAce(rank) && <span style={suitTextStyle}>{sc.symbol}</span>}
+      </div>
 
       {/* 中央 */}
       <div style={{
@@ -160,35 +158,19 @@ export const Card = memo(function Card({
         {isFaceCard(rank) ? (
           <FaceCardIllustration rank={rank} color={sc.color} size={s.centerSize * 2} />
         ) : isAce(rank) ? (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 0,
-            color: sc.color,
-          }}>
-            <span style={{
-              fontSize: s.centerSize * 1.1,
-              fontWeight: 900,
-              fontFamily: 'Arial Black, "Helvetica Neue", Helvetica, sans-serif',
-              lineHeight: 1,
-            }}>A</span>
-            <span style={{ fontSize: s.centerSize * 1.2, lineHeight: 1 }}>
-              {sc.symbol}
-            </span>
+          <div style={{ fontSize: s.centerSize * 1.4, color: sc.color }}>
+            {sc.symbol}
           </div>
         ) : (
           null
         )}
       </div>
 
-      {/* 右下コーナー（Aceは中央スートのみなのでコーナー非表示） */}
-      {!isAce(rank) && (
-        <div style={{ ...cornerStyle, bottom: s.padding, right: s.padding, transform: 'rotate(180deg)' }}>
-          <span style={rankTextStyle}>{rankDisplay}</span>
-          <span style={suitTextStyle}>{sc.symbol}</span>
-        </div>
-      )}
+      {/* 右下コーナー */}
+      <div style={{ ...cornerStyle, bottom: s.padding, right: s.padding, transform: 'rotate(180deg)' }}>
+        <span style={rankTextStyle}>{rankDisplay}</span>
+        {!isAce(rank) && <span style={suitTextStyle}>{sc.symbol}</span>}
+      </div>
     </div>
   );
 });
