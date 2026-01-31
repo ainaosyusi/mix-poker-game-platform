@@ -87,6 +87,7 @@ export const Card = memo(function Card({
   const sc = suitConfig[suit] || suitConfig['s'];
   const rankDisplay = getRankDisplay(rank);
   const isPictureOrAce = isFaceCard(rank) || isAce(rank);
+  const isTen = rank === 'T';
 
   // コーナーの共通スタイル
   const cornerStyle: React.CSSProperties = {
@@ -98,13 +99,13 @@ export const Card = memo(function Card({
     zIndex: 2,
   };
 
-  // ランク文字のスタイル（太く、大きく）
+  // ランク文字のスタイル（10は2文字なので縮小）
   const rankTextStyle: React.CSSProperties = {
-    fontSize: s.rankSize,
+    fontSize: isTen ? s.rankSize * 0.72 : s.rankSize,
     fontWeight: 900,
     color: sc.color,
     fontFamily: 'Arial Black, "Helvetica Neue", Helvetica, sans-serif',
-    letterSpacing: -1,
+    letterSpacing: isTen ? -2 : -1,
     textShadow: '0 1px 1px rgba(0,0,0,0.1)',
   };
 
@@ -112,8 +113,12 @@ export const Card = memo(function Card({
   const suitTextStyle: React.CSSProperties = {
     fontSize: s.cornerSuitSize,
     color: sc.color,
-    marginTop: 0,
+    marginTop: isTen ? -2 : 0,
   };
+
+  // 中央枠のサイズ（カードサイズに対する比率で計算）
+  const centerFrameW = Math.round(s.width * 0.58);
+  const centerFrameH = Math.round(s.height * 0.56);
 
   return (
     <div style={{
@@ -142,8 +147,8 @@ export const Card = memo(function Card({
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        width: isPictureOrAce ? s.width - (s.padding * 3 + s.rankSize) : '100%',
-        height: isPictureOrAce ? s.height - (s.padding * 3 + s.rankSize) : '100%',
+        width: isPictureOrAce ? centerFrameW : '100%',
+        height: isPictureOrAce ? centerFrameH : '100%',
         border: isPictureOrAce ? `${s.borderWidth}px solid ${sc.color}` : 'none',
         borderRadius: s.borderRadius / 1.5,
         backgroundColor: isPictureOrAce ? '#ffffff' : 'transparent',
@@ -153,7 +158,7 @@ export const Card = memo(function Card({
         {isFaceCard(rank) ? (
           <FaceCardIllustration rank={rank} color={sc.color} size={s.centerSize * 2} />
         ) : isAce(rank) ? (
-          <div style={{ fontSize: s.centerSize * 2.5, color: sc.color }}>
+          <div style={{ fontSize: s.centerSize * 1.4, color: sc.color }}>
             {sc.symbol}
           </div>
         ) : (
