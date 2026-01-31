@@ -132,13 +132,11 @@ export const Card = memo(function Card({
       overflow: 'hidden',
       transition: animate ? 'transform 0.2s' : undefined,
     }}>
-      {/* 左上コーナー（エースは中央スートのみなので非表示） */}
-      {!isAce(rank) && (
-        <div style={{ ...cornerStyle, top: s.padding, left: s.padding }}>
-          <span style={rankTextStyle}>{rankDisplay}</span>
-          <span style={suitTextStyle}>{sc.symbol}</span>
-        </div>
-      )}
+      {/* 左上コーナー */}
+      <div style={{ ...cornerStyle, top: s.padding, left: s.padding }}>
+        <span style={rankTextStyle}>{rankDisplay}</span>
+        <span style={suitTextStyle}>{sc.symbol}</span>
+      </div>
 
       {/* 中央 */}
       <div style={{
@@ -168,13 +166,11 @@ export const Card = memo(function Card({
         )}
       </div>
 
-      {/* 右下コーナー（エースは非表示） */}
-      {!isAce(rank) && (
-        <div style={{ ...cornerStyle, bottom: s.padding, right: s.padding, transform: 'rotate(180deg)' }}>
-          <span style={rankTextStyle}>{rankDisplay}</span>
-          <span style={suitTextStyle}>{sc.symbol}</span>
-        </div>
-      )}
+      {/* 右下コーナー */}
+      <div style={{ ...cornerStyle, bottom: s.padding, right: s.padding, transform: 'rotate(180deg)' }}>
+        <span style={rankTextStyle}>{rankDisplay}</span>
+        <span style={suitTextStyle}>{sc.symbol}</span>
+      </div>
     </div>
   );
 });
