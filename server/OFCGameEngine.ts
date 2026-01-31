@@ -93,6 +93,17 @@ export class OFCGameEngine {
 
         const handNumber = (prevOfc?.handNumber || 0) + 1;
 
+        // ボタン位置: FL突入者がいる場合はボタン固定（JOPTルール）
+        let buttonIndex: number;
+        if (prevOfc) {
+            const hasFL = flQueue.length > 0;
+            buttonIndex = hasFL
+                ? prevOfc.buttonIndex   // FL時はボタン停止
+                : (prevOfc.buttonIndex + 1) % ofcPlayers.length;
+        } else {
+            buttonIndex = 0; // 初回はSeat 0
+        }
+
         const ofcState: OFCGameState = {
             phase: 'OFC_INITIAL_PLACING',
             round: 1,
@@ -102,6 +113,8 @@ export class OFCGameEngine {
             fantasylandQueue: [],
             scores: prevOfc?.scores || {},
             bigBlind: room.config.bigBlind,
+            buttonIndex,
+            currentTurnIndex: -1, // 初期ラウンドは同時配置
         };
 
         room.ofcState = ofcState;
@@ -272,12 +285,18 @@ export class OFCGameEngine {
             return [{ type: 'error', data: { reason: 'Not in pineapple placing phase' } }];
         }
 
-        const player = ofc.players.find(p => p.socketId === socketId);
+        const playerIndex = ofc.players.findIndex(p => p.socketId === socketId);
+        const player = playerIndex >= 0 ? ofc.players[playerIndex] : undefined;
         if (!player) {
             return [{ type: 'error', data: { reason: 'Player not found' } }];
         }
         if (player.hasPlaced) {
             return [{ type: 'error', data: { reason: 'Already placed this round' } }];
+        }
+
+        // 順番チェック（Pineappleは順番制）
+        if (ofc.currentTurnIndex >= 0 && ofc.currentTurnIndex !== playerIndex) {
+            return [{ type: 'error', data: { reason: 'Not your turn' } }];
         }
 
         // FL player has already placed everything in initial phase
@@ -326,9 +345,12 @@ export class OFCGameEngine {
         player.currentCards = [];
         player.hasPlaced = true;
 
+        // ターンを次のプレイヤーに進める
+        ofc.currentTurnIndex = this.getNextUnplacedPlayer(ofc);
+
         events.push({
             type: 'placement-accepted',
-            data: { socketId, round: ofc.round },
+            data: { socketId, round: ofc.round, nextTurnIndex: ofc.currentTurnIndex },
         });
 
         if (ofc.players.every(p => p.hasPlaced)) {
@@ -336,6 +358,22 @@ export class OFCGameEngine {
         }
 
         return events;
+    }
+
+    /**
+     * ボタン左から順に、未配置のプレイヤーを探す（FL除く）
+     * 全員配置済み or FLのみ残り → -1
+     */
+    private getNextUnplacedPlayer(ofc: OFCGameState): number {
+        const N = ofc.players.length;
+        for (let i = 1; i <= N; i++) {
+            const idx = (ofc.buttonIndex + i) % N;
+            const player = ofc.players[idx];
+            if (!player.hasPlaced && !player.isFantasyland) {
+                return idx;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -381,10 +419,14 @@ export class OFCGameEngine {
             player.currentCards = cards;
         }
 
+        // Pineappleラウンドは順番制: ボタン左から
+        ofc.currentTurnIndex = this.getNextUnplacedPlayer(ofc);
+
         events.push({
             type: 'deal',
             data: {
                 round: ofc.round,
+                currentTurnIndex: ofc.currentTurnIndex,
                 players: ofc.players.map(p => ({
                     socketId: p.socketId,
                     cardCount: p.isFantasyland ? 0 : p.currentCards.length,
@@ -562,6 +604,10 @@ export class OFCGameEngine {
                     : false,
             })),
             scores: ofc.scores,
+            buttonIndex: ofc.buttonIndex,
+            currentTurnSocketId: ofc.currentTurnIndex >= 0
+                ? ofc.players[ofc.currentTurnIndex]?.socketId || null
+                : null,
         };
     }
 }

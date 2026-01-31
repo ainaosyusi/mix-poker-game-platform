@@ -190,6 +190,8 @@ export interface OFCPublicState {
   handNumber: number;
   players: OFCPlayerInfo[];
   scores: Record<string, number>;
+  buttonIndex: number;
+  currentTurnSocketId: string | null;
 }
 
 export interface OFCRoundScore {

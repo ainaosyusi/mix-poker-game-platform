@@ -103,6 +103,8 @@ export interface OFCGameState {
     fantasylandQueue: string[];       // 次ハンドFL突入者
     scores: Record<string, number>;   // 累積ポイント
     bigBlind: number;                 // チップ変換用
+    buttonIndex: number;              // ディーラーボタン位置（players配列のindex）
+    currentTurnIndex: number;         // 現在ターン（-1 = 同時配置、初期ラウンド用）
 }
 
 export interface OFCPlacement {

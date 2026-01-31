@@ -627,53 +627,78 @@ function fillOFCBots(room: any) {
 }
 
 /**
- * BOTの自動配置をスケジュール（遅延つき）
+ * BOTの自動配置をスケジュール（初期ラウンド用 - 同時配置）
  */
 function scheduleOFCBotActions(roomId: string, room: any, io: Server, engine: OFCGameEngine) {
   const ofc = room.ofcState;
   if (!ofc) return;
 
-  for (const player of ofc.players) {
-    if (!player.isBot) continue;
-    if (player.hasPlaced) continue;
+  // 初期ラウンド: 全BOT同時配置
+  if (ofc.phase === 'OFC_INITIAL_PLACING') {
+    for (const player of ofc.players) {
+      if (!player.isBot || player.hasPlaced) continue;
 
-    // Mark as bot in OFC state
-    player.isBot = true;
+      const delay = 500 + Math.random() * 1000;
+      setTimeout(() => {
+        const currentRoom = roomManager.getRoomById(roomId);
+        if (!currentRoom || !currentRoom.ofcState) return;
+        const cp = currentRoom.ofcState.players.find((p: any) => p.socketId === player.socketId);
+        if (!cp || cp.hasPlaced) return;
 
-    // Random delay 0.5-1.5s
-    const delay = 500 + Math.random() * 1000;
-
-    setTimeout(() => {
-      const currentRoom = roomManager.getRoomById(roomId);
-      if (!currentRoom || !currentRoom.ofcState) return;
-
-      const currentPlayer = currentRoom.ofcState.players.find(
-        (p: any) => p.socketId === player.socketId
-      );
-      if (!currentPlayer || currentPlayer.hasPlaced) return;
-
-      let events;
-      if (currentRoom.ofcState.phase === 'OFC_INITIAL_PLACING') {
-        if (currentPlayer.isFantasyland && currentPlayer.fantasyCandidateCards) {
-          const { placements, discard } = botPlaceFantasyland(currentPlayer.fantasyCandidateCards);
+        let events;
+        if (cp.isFantasyland && cp.fantasyCandidateCards) {
+          const { placements, discard } = botPlaceFantasyland(cp.fantasyCandidateCards);
           events = engine.placeInitialCards(currentRoom, player.socketId, placements, discard);
         } else {
-          const placements = botPlaceInitial(currentPlayer.currentCards);
+          const placements = botPlaceInitial(cp.currentCards);
           events = engine.placeInitialCards(currentRoom, player.socketId, placements);
         }
-      } else if (currentRoom.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
-        const { placements, discard } = botPlacePineapple(
-          currentPlayer.currentCards,
-          currentPlayer.board,
-        );
-        events = engine.placePineappleCards(currentRoom, player.socketId, placements, discard);
-      }
-
-      if (events) {
-        processOFCEvents(roomId, currentRoom, io, engine, events);
-      }
-    }, delay);
+        if (events) processOFCEvents(roomId, currentRoom, io, engine, events);
+      }, delay);
+    }
+  } else {
+    // Pineappleラウンド: 現在ターンのBOTのみスケジュール
+    scheduleCurrentTurnBot(roomId, room, io, engine);
   }
+}
+
+/**
+ * Pineappleラウンド: 現在ターンがBOTならスケジュール
+ */
+function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: OFCGameEngine) {
+  const ofc = room.ofcState;
+  if (!ofc || ofc.currentTurnIndex < 0) return;
+
+  const currentPlayer = ofc.players[ofc.currentTurnIndex];
+  if (!currentPlayer || !currentPlayer.isBot || currentPlayer.hasPlaced) return;
+
+  const delay = 500 + Math.random() * 1000;
+  setTimeout(() => {
+    const currentRoom = roomManager.getRoomById(roomId);
+    if (!currentRoom || !currentRoom.ofcState) return;
+    const cp = currentRoom.ofcState.players[currentRoom.ofcState.currentTurnIndex];
+    if (!cp || !cp.isBot || cp.hasPlaced) return;
+
+    let events;
+    if (currentRoom.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
+      const { placements, discard } = botPlacePineapple(cp.currentCards, cp.board);
+      events = engine.placePineappleCards(currentRoom, cp.socketId, placements, discard);
+    }
+    if (events) processOFCEvents(roomId, currentRoom, io, engine, events);
+  }, delay);
+}
+
+/**
+ * OFCルームから人間が退出時: BOTを全削除・ofcStateリセット
+ */
+function cleanupOFCRoom(room: any) {
+  for (let i = 0; i < room.players.length; i++) {
+    if (room.players[i]?.socketId.startsWith('bot-')) {
+      room.players[i] = null;
+    }
+  }
+  room.ofcState = undefined;
+  room.gameState.status = 'WAITING';
 }
 
 /**
@@ -684,6 +709,10 @@ function processOFCEvents(roomId: string, room: any, io: Server, engine: OFCGame
     switch (event.type) {
       case 'placement-accepted':
         broadcastRoomState(roomId, room, io);
+        // Pineappleラウンドで次のターンがBOTならスケジュール
+        if (room.ofcState?.phase === 'OFC_PINEAPPLE_PLACING') {
+          scheduleCurrentTurnBot(roomId, room, io, engine);
+        }
         break;
 
       case 'round-complete':
@@ -754,6 +783,16 @@ function handleInGameExit(
     endSession(socket.id, player.stack);
   }
 
+  // OFCゲーム中の退出: BOT全削除・即座にリセット
+  if (room.gameState.gameVariant === 'OFC') {
+    room.players[seatIndex] = null;
+    cleanupOFCRoom(room);
+    if (leaveRoom) socket.leave(`room:${roomId}`);
+    broadcastRoomState(roomId, room, io);
+    io.to('lobby').emit('room-list-update', roomManager.getAllRooms());
+    return;
+  }
+
   player.pendingLeave = true;
   player.pendingSitOut = true;
   player.pendingJoin = false;
@@ -804,6 +843,11 @@ function handleWaitingExit(
     if (exitPlayer && hasActiveSession(socket.id)) {
       endSession(socket.id, exitPlayer.stack);
     }
+  }
+
+  // OFCルーム: 人間退出でBOT全削除
+  if (exitRoom && exitRoom.gameState.gameVariant === 'OFC') {
+    cleanupOFCRoom(exitRoom);
   }
 
   roomManager.standUp(roomId, socket.id);

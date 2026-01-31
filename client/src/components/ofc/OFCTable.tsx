@@ -11,6 +11,7 @@ import type {
 import { OFCBoard } from './OFCBoard';
 import { OFCCardPlacer } from './OFCCardPlacer';
 import { OFCScoreboard } from './OFCScoreboard';
+import { useOrientation } from '../../hooks/useOrientation';
 
 interface OFCTableProps {
   socket: Socket;
@@ -19,11 +20,18 @@ interface OFCTableProps {
   onLeaveRoom: () => void;
 }
 
-// 3人用座席配置（テーブル上/左下/右下）
-const SEAT_POSITIONS_3 = [
+// 3人用座席配置（landscape: テーブル上/左下/右下）
+const SEAT_POSITIONS_LANDSCAPE = [
   { top: '8%', left: '50%', transform: 'translateX(-50%)' },   // 上
   { bottom: '8%', left: '12%' },                                // 左下
   { bottom: '8%', right: '12%' },                               // 右下
+];
+
+// 3人用座席配置（portrait: 自分=下、他=上に配置して重ならない）
+const SEAT_POSITIONS_PORTRAIT = [
+  { top: '3%', left: '50%', transform: 'translateX(-50%)' },   // 上（自分）
+  { top: '3%', left: '5%' },                                    // 左上
+  { top: '3%', right: '5%' },                                   // 右上
 ];
 
 export const OFCTable = memo(function OFCTable({
@@ -36,6 +44,8 @@ export const OFCTable = memo(function OFCTable({
   const [scoringResult, setScoringResult] = useState<OFCRoundScore[] | null>(null);
   const [fantasylandPlayers, setFantasylandPlayers] = useState<string[]>([]);
 
+  const orientation = useOrientation();
+  const isPortrait = orientation === 'portrait';
   const ofcState = room.ofcState;
 
   // Socket event listeners
@@ -86,7 +96,11 @@ export const OFCTable = memo(function OFCTable({
   // Find "you" in OFC players
   const myOFCPlayer = ofcState?.players.find(p => p.socketId === yourSocketId);
   const isPlacingPhase = ofcState?.phase === 'OFC_INITIAL_PLACING' || ofcState?.phase === 'OFC_PINEAPPLE_PLACING';
-  const canPlace = isPlacingPhase && myOFCPlayer && !myOFCPlayer.hasPlaced && yourCards.length > 0;
+  const isPineapple = ofcState?.phase === 'OFC_PINEAPPLE_PLACING';
+
+  // In pineapple phase, only allow placement when it's your turn
+  const isMyTurn = !isPineapple || ofcState?.currentTurnSocketId === yourSocketId;
+  const canPlace = isPlacingPhase && myOFCPlayer && !myOFCPlayer.hasPlaced && yourCards.length > 0 && isMyTurn;
 
   // Sort players: you first, then others
   const sortedPlayers = ofcState?.players
@@ -95,6 +109,9 @@ export const OFCTable = memo(function OFCTable({
         ...ofcState.players.filter(p => p.socketId !== yourSocketId),
       ]
     : [];
+
+  // Button player's socketId
+  const buttonSocketId = ofcState?.players[ofcState.buttonIndex]?.socketId;
 
   // Lobby state: first hand requires manual start
   const isLobby = !ofcState || ofcState.phase === 'OFC_WAITING';
@@ -113,6 +130,9 @@ export const OFCTable = memo(function OFCTable({
   const handleStartGame = useCallback(() => {
     socket.emit('ofc-start-game');
   }, [socket]);
+
+  // Choose seat positions based on orientation
+  const seatPositions = isPortrait ? SEAT_POSITIONS_PORTRAIT : SEAT_POSITIONS_LANDSCAPE;
 
   return (
     <div style={{
@@ -174,25 +194,27 @@ export const OFCTable = memo(function OFCTable({
       </div>
 
       {/* Table felt */}
-      <div style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: '80%',
-        maxWidth: 600,
-        height: '60%',
-        maxHeight: 400,
-        borderRadius: '50%',
-        background: 'radial-gradient(ellipse at center, #1e5a3a 0%, #14432b 100%)',
-        border: '3px solid #2d7a4f',
-        boxShadow: 'inset 0 0 30px rgba(0,0,0,0.3), 0 0 20px rgba(0,0,0,0.5)',
-      }} />
+      {!isPortrait && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: '80%',
+          maxWidth: 600,
+          height: '60%',
+          maxHeight: 400,
+          borderRadius: '50%',
+          background: 'radial-gradient(ellipse at center, #1e5a3a 0%, #14432b 100%)',
+          border: '3px solid #2d7a4f',
+          boxShadow: 'inset 0 0 30px rgba(0,0,0,0.3), 0 0 20px rgba(0,0,0,0.5)',
+        }} />
+      )}
 
       {/* Center info / Lobby controls */}
       <div style={{
         position: 'absolute',
-        top: '45%',
+        top: isPortrait ? '35%' : '45%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
         textAlign: 'center',
@@ -315,6 +337,13 @@ export const OFCTable = memo(function OFCTable({
             {ofcState?.phase === 'OFC_PINEAPPLE_PLACING' && (
               <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)' }}>
                 Pineapple Round {(ofcState.round || 1) - 1}
+                {ofcState.currentTurnSocketId && (
+                  <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 2 }}>
+                    {ofcState.currentTurnSocketId === yourSocketId
+                      ? 'Your turn'
+                      : `${ofcState.players.find(p => p.socketId === ofcState.currentTurnSocketId)?.name || '...'}'s turn`}
+                  </div>
+                )}
               </div>
             )}
             {ofcState?.phase === 'OFC_SCORING' && (
@@ -334,7 +363,17 @@ export const OFCTable = memo(function OFCTable({
       {/* Player boards */}
       {sortedPlayers.map((player, idx) => {
         const isYou = player.socketId === yourSocketId;
-        const posStyle = SEAT_POSITIONS_3[idx] || {};
+        const isButton = player.socketId === buttonSocketId;
+        const isCurrentTurn = player.socketId === ofcState?.currentTurnSocketId;
+        const posStyle = isPortrait
+          ? (idx === 0
+              // 自分: portrait時は下に配置（カードプレーサーの上）
+              ? { bottom: isPlacingPhase && canPlace ? '38%' : '25%', left: '50%', transform: 'translateX(-50%)' }
+              // 他プレイヤー: portrait時は上に並べる
+              : idx === 1
+                ? { top: '3%', left: '5%' }
+                : { top: '3%', right: '5%' })
+          : (seatPositions[idx] || {});
         const showFoul = ofcState?.phase === 'OFC_SCORING' || ofcState?.phase === 'OFC_DONE';
 
         return (
@@ -346,7 +385,7 @@ export const OFCTable = memo(function OFCTable({
               zIndex: isYou ? 8 : 5,
             }}
           >
-            {/* Player name + status */}
+            {/* Player name + status + button indicator */}
             <div style={{
               textAlign: 'center',
               marginBottom: 4,
@@ -354,11 +393,37 @@ export const OFCTable = memo(function OFCTable({
               <span style={{
                 fontSize: 11,
                 fontWeight: 600,
-                color: isYou ? '#22c55e' : '#fff',
-                background: 'rgba(0,0,0,0.5)',
+                color: isCurrentTurn && isPineapple
+                  ? '#fbbf24'
+                  : isYou ? '#22c55e' : '#fff',
+                background: isCurrentTurn && isPineapple
+                  ? 'rgba(251,191,36,0.15)'
+                  : 'rgba(0,0,0,0.5)',
                 padding: '2px 8px',
                 borderRadius: 4,
+                border: isCurrentTurn && isPineapple
+                  ? '1px solid rgba(251,191,36,0.4)'
+                  : 'none',
               }}>
+                {isButton && (
+                  <span style={{
+                    display: 'inline-block',
+                    width: 16,
+                    height: 16,
+                    lineHeight: '16px',
+                    borderRadius: '50%',
+                    background: '#fff',
+                    color: '#000',
+                    fontSize: 9,
+                    fontWeight: 800,
+                    textAlign: 'center',
+                    marginRight: 4,
+                    verticalAlign: 'middle',
+                    border: '1px solid #333',
+                  }}>
+                    D
+                  </span>
+                )}
                 {player.name}
                 {isYou && ' (You)'}
                 {player.isFantasyland && ' FL'}
@@ -371,7 +436,7 @@ export const OFCTable = memo(function OFCTable({
                 {player.stack.toLocaleString()} chips
                 {!player.hasPlaced && isPlacingPhase && (
                   <span style={{ color: '#fbbf24', marginLeft: 6 }}>
-                    Placing...
+                    {isCurrentTurn && isPineapple ? 'Turn' : 'Placing...'}
                   </span>
                 )}
                 {player.hasPlaced && isPlacingPhase && (
@@ -410,6 +475,31 @@ export const OFCTable = memo(function OFCTable({
             isFantasyland={myOFCPlayer.isFantasyland}
             onConfirm={handleConfirmPlacement}
           />
+        </div>
+      )}
+
+      {/* Waiting for turn indicator (pineapple phase, not your turn) */}
+      {isPineapple && myOFCPlayer && !myOFCPlayer.hasPlaced && yourCards.length > 0 && !isMyTurn && (
+        <div style={{
+          position: 'absolute',
+          bottom: 20,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 20,
+          background: 'rgba(0,0,0,0.6)',
+          borderRadius: 8,
+          padding: '8px 16px',
+          border: '1px solid rgba(255,255,255,0.1)',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>
+            Waiting for your turn...
+          </div>
+          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginTop: 2 }}>
+            {ofcState?.currentTurnSocketId
+              ? `${ofcState.players.find(p => p.socketId === ofcState.currentTurnSocketId)?.name || '...'} is placing`
+              : ''}
+          </div>
         </div>
       )}
 
