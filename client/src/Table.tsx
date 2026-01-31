@@ -18,10 +18,9 @@ import { useDrawPhaseState } from './hooks/useDrawPhaseState';
 import { useLeaveRoomOnUnmount } from './hooks/useLeaveRoomOnUnmount';
 import { useOrientation } from './hooks/useOrientation';
 import { useSyncYourHand } from './hooks/useSyncYourHand';
+import { useGameActions } from './hooks/useGameActions';
 import { HostControlsPanel } from './components/HostControlsPanel';
 import type {
-  Player,
-  GameState,
   Room,
   ActionType,
   ShowdownResult,
@@ -132,61 +131,27 @@ export function Table({
   const orientation = useOrientation();
   const isPortrait = orientation === 'portrait';
 
-  // アクション実行
-  const handleAction = useCallback((type: ActionType, amount?: number) => {
-    if (!socket) return;
-    socket.emit('player-action', { type, amount, actionToken });
-    setIsYourTurn(false);
-    setTimerSeconds(undefined);
-  }, [socket, actionToken]);
-
-  // タイムバンク使用
-  const handleUseTimeBank = useCallback(() => {
-    if (!socket || timeBankChips <= 0) return;
-    socket.emit('use-timebank');
-    setTimeBankChips(prev => Math.max(0, prev - 1));
-    setTimerSeconds(prev => (prev || 0) + 30);
-  }, [socket, timeBankChips]);
-
-  // ドローカード選択トグル
-  const toggleDrawCard = useCallback((index: number) => {
-    setSelectedDrawCards(prev => {
-      if (prev.includes(index)) {
-        return prev.filter(i => i !== index);
-      } else {
-        if (prev.length >= maxDrawCount) {
-          return prev;
-        }
-        return [...prev, index];
-      }
-    });
-  }, [maxDrawCount]);
-
-  // ドロー実行
-  const handleDraw = useCallback(() => {
-    if (!socket) return;
-    socket.emit('draw-exchange', { discardIndexes: selectedDrawCards });
-  }, [socket, selectedDrawCards]);
-
-  // 離席（leave-room発行 → メインメニューへ）
-  const handleLeaveRoom = useCallback(() => {
-    if (!socket) return;
-    socket.emit('leave-room');
-    localStorage.removeItem('mgp-last-room');
-    onLeaveRoom();
-  }, [socket, onLeaveRoom]);
-
-  // リバイ
-  const handleRebuy = useCallback(() => {
-    if (!socket || rebuyAmount <= 0) return;
-    socket.emit('rebuy', { amount: rebuyAmount });
-  }, [socket, rebuyAmount]);
-
-  // I'm Back（仮離席から復帰）
-  const handleImBack = useCallback(() => {
-    if (!socket) return;
-    socket.emit('im-back');
-  }, [socket]);
+  const {
+    handleAction,
+    handleUseTimeBank,
+    toggleDrawCard,
+    handleDraw,
+    handleLeaveRoom,
+    handleRebuy,
+    handleImBack,
+  } = useGameActions({
+    socket,
+    actionToken,
+    timeBankChips,
+    rebuyAmount,
+    selectedDrawCards,
+    maxDrawCount,
+    onLeaveRoom,
+    setIsYourTurn,
+    setTimerSeconds,
+    setTimeBankChips,
+    setSelectedDrawCards,
+  });
 
   // ローディング中
   if (!room) {
