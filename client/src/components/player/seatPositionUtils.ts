@@ -1,35 +1,44 @@
 /**
  * 座席位置計算ユーティリティ
  * チップ・ディーラーボタン・スタッドカードの位置を計算
+ *
+ * 配置原則（重なり防止）:
+ *   カード: プレイヤーパネルのすぐ上（最も近い）
+ *   ディーラーボタン: パネルの横方向にオフセット（カードと異なる軸）
+ *   チップ: テーブル中央方向に最も遠い位置
  */
 
-// チップ位置を座席に応じて計算（テーブル中央寄りに配置）
+// ============================
+// ランドスケープ: チップ位置
+// ============================
 export function getChipPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
     switch (seatIndex) {
-      case 0: return { bottom: '100%', marginBottom: 55, left: '50%', transform: 'translateX(-50%)' };
-      case 1: return { bottom: '90%', right: '-70%' };
-      case 2: return { top: '90%', right: '-70%' };
-      case 3: return { top: '100%', marginTop: 55, left: '50%', transform: 'translateX(-50%)' };
-      case 4: return { top: '90%', left: '-70%' };
-      case 5: return { bottom: '90%', left: '-70%' };
-      default: return { top: '100%', marginTop: 55 };
+      case 0: return { bottom: '100%', marginBottom: 70, left: '50%', transform: 'translateX(-50%)' };
+      case 1: return { bottom: '80%', right: '-90%' };
+      case 2: return { top: '80%', right: '-90%' };
+      case 3: return { top: '100%', marginTop: 70, left: '50%', transform: 'translateX(-50%)' };
+      case 4: return { top: '80%', left: '-90%' };
+      case 5: return { bottom: '80%', left: '-90%' };
+      default: return { top: '100%', marginTop: 70 };
     }
   }
   switch (seatIndex) {
-    case 0: return { bottom: '100%', marginBottom: 55, left: '50%', transform: 'translateX(-50%)' };
-    case 1: return { bottom: '70%', right: '-60%' };
-    case 2: return { top: '50%', right: '-70%', transform: 'translateY(-50%)' };
-    case 3: return { top: '70%', right: '-60%' };
-    case 4: return { top: '100%', marginTop: 55, left: '50%', transform: 'translateX(-50%)' };
-    case 5: return { top: '70%', left: '-60%' };
-    case 6: return { top: '50%', left: '-70%', transform: 'translateY(-50%)' };
-    case 7: return { bottom: '70%', left: '-60%' };
-    default: return { top: '100%', marginTop: 55 };
+    case 0: return { bottom: '100%', marginBottom: 70, left: '50%', transform: 'translateX(-50%)' };
+    case 1: return { bottom: '65%', right: '-85%' };
+    case 2: return { top: '50%', right: '-95%', transform: 'translateY(-50%)' };
+    case 3: return { top: '65%', right: '-85%' };
+    case 4: return { top: '100%', marginTop: 70, left: '50%', transform: 'translateX(-50%)' };
+    case 5: return { top: '65%', left: '-85%' };
+    case 6: return { top: '50%', left: '-95%', transform: 'translateY(-50%)' };
+    case 7: return { bottom: '65%', left: '-85%' };
+    default: return { top: '100%', marginTop: 70 };
   }
 }
 
-// Stud用アップカード位置（テーブル中央寄り、チップと重ならない位置）
+// ============================
+// ランドスケープ: Studアップカード位置
+// ============================
 export function getStudUpCardsPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
     switch (seatIndex) {
@@ -55,7 +64,9 @@ export function getStudUpCardsPosition(seatIndex: number, maxPlayers: 6 | 8): Re
   }
 }
 
-// ポートレート用Stud アップカード位置（縮小オフセット、重なり回避）
+// ============================
+// ポートレート: Studアップカード位置
+// ============================
 export function getStudUpCardsPositionPortrait(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
     switch (seatIndex) {
@@ -81,80 +92,87 @@ export function getStudUpCardsPositionPortrait(seatIndex: number, maxPlayers: 6 
   }
 }
 
-// ポートレート用チップ位置（テーブル中心方向にオフセット縮小）
+// ============================
+// ポートレート: チップ位置
+// ============================
 export function getChipPositionPortrait(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
     switch (seatIndex) {
-      case 0: return { bottom: '100%', marginBottom: 22, left: '50%', transform: 'translateX(-50%)' };
-      case 1: return { bottom: '60%', right: '-45%' };
-      case 2: return { top: '60%', right: '-45%' };
-      case 3: return { top: '100%', marginTop: 22, left: '50%', transform: 'translateX(-50%)' };
-      case 4: return { top: '60%', left: '-45%' };
-      case 5: return { bottom: '60%', left: '-45%' };
-      default: return { top: '100%', marginTop: 22 };
+      case 0: return { bottom: '100%', marginBottom: 45, left: '50%', transform: 'translateX(-50%)' };
+      case 1: return { bottom: '70%', right: '-55%' };
+      case 2: return { top: '70%', right: '-55%' };
+      case 3: return { top: '100%', marginTop: 45, left: '50%', transform: 'translateX(-50%)' };
+      case 4: return { top: '70%', left: '-55%' };
+      case 5: return { bottom: '70%', left: '-55%' };
+      default: return { top: '100%', marginTop: 45 };
     }
   }
   switch (seatIndex) {
-    case 0: return { bottom: '100%', marginBottom: 22, left: '50%', transform: 'translateX(-50%)' };
-    case 1: return { bottom: '55%', right: '-40%' };
-    case 2: return { top: '50%', right: '-45%', transform: 'translateY(-50%)' };
-    case 3: return { top: '55%', right: '-40%' };
-    case 4: return { top: '100%', marginTop: 22, left: '50%', transform: 'translateX(-50%)' };
-    case 5: return { top: '55%', left: '-40%' };
-    case 6: return { top: '50%', left: '-45%', transform: 'translateY(-50%)' };
-    case 7: return { bottom: '55%', left: '-40%' };
-    default: return { top: '100%', marginTop: 22 };
+    case 0: return { bottom: '100%', marginBottom: 45, left: '50%', transform: 'translateX(-50%)' };
+    case 1: return { bottom: '60%', right: '-50%' };
+    case 2: return { top: '50%', right: '-55%', transform: 'translateY(-50%)' };
+    case 3: return { top: '60%', right: '-50%' };
+    case 4: return { top: '100%', marginTop: 45, left: '50%', transform: 'translateX(-50%)' };
+    case 5: return { top: '60%', left: '-50%' };
+    case 6: return { top: '50%', left: '-55%', transform: 'translateY(-50%)' };
+    case 7: return { bottom: '60%', left: '-50%' };
+    default: return { top: '100%', marginTop: 45 };
   }
 }
 
-// ディーラーボタン位置を座席に応じて計算（チップと重ならない位置）
+// ============================
+// ランドスケープ: ディーラーボタン位置
+// カードと同じ垂直ラインを避け、横方向にオフセット
+// ============================
 export function getDealerButtonPosition(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
     switch (seatIndex) {
-      case 0: return { bottom: '100%', marginBottom: 25, left: '20%' };
-      case 1: return { bottom: '60%', right: '-35%' };
-      case 2: return { top: '60%', right: '-35%' };
-      case 3: return { top: '100%', marginTop: 25, left: '20%' };
-      case 4: return { top: '60%', left: '-35%' };
-      case 5: return { bottom: '60%', left: '-35%' };
-      default: return { top: '100%', marginTop: 25 };
+      case 0: return { bottom: '100%', marginBottom: 30, right: '-40%' };
+      case 1: return { bottom: '40%', right: '-50%' };
+      case 2: return { top: '40%', right: '-50%' };
+      case 3: return { top: '100%', marginTop: 30, right: '-40%' };
+      case 4: return { top: '40%', left: '-50%' };
+      case 5: return { bottom: '40%', left: '-50%' };
+      default: return { top: '100%', marginTop: 30 };
     }
   }
   switch (seatIndex) {
-    case 0: return { bottom: '100%', marginBottom: 25, left: '20%' };
-    case 1: return { bottom: '40%', right: '-35%' };
-    case 2: return { top: '20%', right: '-40%' };
-    case 3: return { top: '40%', right: '-35%' };
-    case 4: return { top: '100%', marginTop: 25, left: '20%' };
-    case 5: return { top: '40%', left: '-35%' };
-    case 6: return { top: '20%', left: '-40%' };
-    case 7: return { bottom: '40%', left: '-35%' };
-    default: return { top: '100%', marginTop: 25 };
+    case 0: return { bottom: '100%', marginBottom: 30, right: '-40%' };
+    case 1: return { bottom: '30%', right: '-50%' };
+    case 2: return { top: '15%', right: '-50%' };
+    case 3: return { top: '30%', right: '-50%' };
+    case 4: return { top: '100%', marginTop: 30, right: '-40%' };
+    case 5: return { top: '30%', left: '-50%' };
+    case 6: return { top: '15%', left: '-50%' };
+    case 7: return { bottom: '30%', left: '-50%' };
+    default: return { top: '100%', marginTop: 30 };
   }
 }
 
-// ポートレート用ディーラーボタン位置
+// ============================
+// ポートレート: ディーラーボタン位置
+// ============================
 export function getDealerButtonPositionPortrait(seatIndex: number, maxPlayers: 6 | 8): React.CSSProperties {
   if (maxPlayers === 6) {
     switch (seatIndex) {
-      case 0: return { bottom: '100%', marginBottom: 10, left: '20%' };
-      case 1: return { bottom: '50%', right: '-25%' };
-      case 2: return { top: '50%', right: '-25%' };
-      case 3: return { top: '100%', marginTop: 10, left: '20%' };
-      case 4: return { top: '50%', left: '-25%' };
-      case 5: return { bottom: '50%', left: '-25%' };
-      default: return { top: '100%', marginTop: 10 };
+      case 0: return { bottom: '100%', marginBottom: 15, right: '-35%' };
+      case 1: return { bottom: '25%', right: '-35%' };
+      case 2: return { top: '25%', right: '-35%' };
+      case 3: return { top: '100%', marginTop: 15, right: '-35%' };
+      case 4: return { top: '25%', left: '-35%' };
+      case 5: return { bottom: '25%', left: '-35%' };
+      default: return { top: '100%', marginTop: 15 };
     }
   }
   switch (seatIndex) {
-    case 0: return { bottom: '100%', marginBottom: 10, left: '20%' };
-    case 1: return { bottom: '35%', right: '-25%' };
-    case 2: return { top: '20%', right: '-30%' };
-    case 3: return { top: '35%', right: '-25%' };
-    case 4: return { top: '100%', marginTop: 10, left: '20%' };
-    case 5: return { top: '35%', left: '-25%' };
-    case 6: return { top: '20%', left: '-30%' };
-    case 7: return { bottom: '35%', left: '-25%' };
-    default: return { top: '100%', marginTop: 10 };
+    case 0: return { bottom: '100%', marginBottom: 15, right: '-35%' };
+    case 1: return { bottom: '20%', right: '-30%' };
+    case 2: return { top: '15%', right: '-35%' };
+    case 3: return { top: '20%', right: '-30%' };
+    case 4: return { top: '100%', marginTop: 15, right: '-35%' };
+    case 5: return { top: '20%', left: '-30%' };
+    case 6: return { top: '15%', left: '-35%' };
+    case 7: return { bottom: '20%', left: '-30%' };
+    default: return { top: '100%', marginTop: 15 };
   }
 }

@@ -60,9 +60,9 @@ export const PlayerSeat = memo(function PlayerSeat({
   orientation = 'landscape',
 }: PlayerSeatProps) {
   const isPortrait = orientation === 'portrait';
-  // ポートレート時: 自分=small, 他人=tiny / ランドスケープ: 全員small
+  // ポートレート時: 全員tiny / ランドスケープ: 全員small
   const cardSize: 'tiny' | 'small' | 'medium' | 'large' = isPortrait
-    ? (isYou ? 'small' : 'tiny')
+    ? 'tiny'
     : 'small';
   const isFolded = player?.status === 'FOLDED';
   const isAllIn = player?.status === 'ALL_IN';
@@ -239,8 +239,8 @@ export const PlayerSeat = memo(function PlayerSeat({
           style={{
             position: 'absolute',
             bottom: isPortrait
-              ? (isDrawGame ? '60%' : '52%')
-              : (isDrawGame ? '68%' : '58%'),
+              ? (isDrawGame ? '62%' : '55%')
+              : (isDrawGame ? '70%' : '60%'),
             display: 'flex',
             gap: isDrawGame ? -6 : -8,
             zIndex: 10,
@@ -296,7 +296,7 @@ export const PlayerSeat = memo(function PlayerSeat({
           <div
             style={{
               position: 'absolute',
-              bottom: isPortrait ? '52%' : '58%',
+              bottom: isPortrait ? '55%' : '60%',
               display: 'flex',
               gap: -8,
               zIndex: 10,
