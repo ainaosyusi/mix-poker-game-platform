@@ -359,6 +359,11 @@ function scheduleNextHand(roomId: string, io: Server) {
     return;
   }
 
+  // OFCルームの場合、プレイヤーチェック前にBOTを追加（人間が1人でも開始可能にする）
+  if (room.gameState.gameVariant === 'OFC') {
+    fillOFCBots(room);
+  }
+
   // ACTIVEプレイヤー + pendingJoin(BB待ちでない)SIT_OUTプレイヤーを確認
   // pendingJoin && !waitingForBB のSIT_OUTプレイヤーはresetPlayersForNewHandでACTIVEになるのでカウントする
   const activePlayers = room.players.filter(p =>

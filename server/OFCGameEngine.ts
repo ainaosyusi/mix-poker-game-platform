@@ -86,7 +86,7 @@ export class OFCGameEngine {
                 isFantasyland: isFL,
                 fantasyCandidateCards: isFL ? cards : undefined,
                 hasPlaced: false,
-                isBot: false,
+                isBot: p!.socketId.startsWith('bot-'),
                 isFouled: false,
             };
         });
