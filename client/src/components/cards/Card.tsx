@@ -160,8 +160,22 @@ export const Card = memo(function Card({
         {isFaceCard(rank) ? (
           <FaceCardIllustration rank={rank} color={sc.color} size={s.centerSize * 2} />
         ) : isAce(rank) ? (
-          <div style={{ fontSize: s.centerSize * 1.4, color: sc.color }}>
-            {sc.symbol}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 0,
+            color: sc.color,
+          }}>
+            <span style={{
+              fontSize: s.centerSize * 1.1,
+              fontWeight: 900,
+              fontFamily: 'Arial Black, "Helvetica Neue", Helvetica, sans-serif',
+              lineHeight: 1,
+            }}>A</span>
+            <span style={{ fontSize: s.centerSize * 1.2, lineHeight: 1 }}>
+              {sc.symbol}
+            </span>
           </div>
         ) : (
           null
