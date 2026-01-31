@@ -118,7 +118,7 @@ export const OFCTable = memo(function OFCTable({
     <div style={{
       position: 'relative',
       width: '100%',
-      height: '100%',
+      height: '100vh',
       background: 'radial-gradient(ellipse at center, #1a3a2a 0%, #0f1f17 70%)',
       overflow: 'hidden',
     }}>
