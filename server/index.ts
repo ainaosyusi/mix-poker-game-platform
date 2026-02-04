@@ -644,11 +644,16 @@ function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: O
   if (!currentPlayer || !currentPlayer.isBot || currentPlayer.hasPlaced) return;
 
   const delay = 500 + Math.random() * 1000;
-  setTimeout(() => {
+  setTimeout(async () => {
     const currentRoom = roomManager.getRoomById(roomId);
     if (!currentRoom || !currentRoom.ofcState) return;
     const cp = currentRoom.ofcState.players[currentRoom.ofcState.currentTurnIndex];
     if (!cp || !cp.isBot || cp.hasPlaced) return;
+
+    // 相手のボード情報を収集（AI推論用）
+    const opponentBoards = currentRoom.ofcState.players
+      .filter((p: any) => p && p.socketId !== cp.socketId)
+      .map((p: any) => p.board);
 
     let events;
     if (currentRoom.ofcState.phase === 'OFC_INITIAL_PLACING') {
@@ -657,12 +662,12 @@ function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: O
         const { placements, discard } = botPlaceFantasyland(cp.fantasyCandidateCards);
         events = engine.placeInitialCards(currentRoom, cp.socketId, placements, discard);
       } else {
-        const placements = botPlaceInitial(cp.currentCards);
+        const placements = await botPlaceInitial(cp.currentCards, opponentBoards);
         events = engine.placeInitialCards(currentRoom, cp.socketId, placements);
       }
     } else if (currentRoom.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
       // Pineappleラウンド: 3枚→2枚配置+1捨て
-      const { placements, discard } = botPlacePineapple(cp.currentCards, cp.board);
+      const { placements, discard } = await botPlacePineapple(cp.currentCards, cp.board, opponentBoards);
       events = engine.placePineappleCards(currentRoom, cp.socketId, placements, discard);
     }
     if (events) processOFCEvents(roomId, currentRoom, io, engine, events);
