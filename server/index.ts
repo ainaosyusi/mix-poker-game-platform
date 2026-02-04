@@ -694,6 +694,14 @@ function processOFCEvents(roomId: string, room: any, io: Server, engine: OFCGame
   for (const event of events) {
     switch (event.type) {
       case 'placement-accepted':
+        // 配置ログをブロードキャスト
+        io.to(`room:${roomId}`).emit('ofc-placed', {
+          socketId: event.data.socketId,
+          playerName: event.data.playerName,
+          placements: event.data.placements || [],
+          discardCard: event.data.discardCard,
+          isFantasyland: event.data.isFantasyland || false,
+        });
         broadcastRoomState(roomId, room, io);
         // 次のターンがBOTならスケジュール（全ラウンド共通）
         if (room.ofcState?.phase === 'OFC_INITIAL_PLACING' || room.ofcState?.phase === 'OFC_PINEAPPLE_PLACING') {

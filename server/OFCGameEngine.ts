@@ -206,9 +206,18 @@ export class OFCGameEngine {
         // ターンを次のプレイヤーに進める
         ofc.currentTurnIndex = this.getNextUnplacedPlayer(ofc);
 
+        // 配置情報をまとめる
+        const placementSummary = this.summarizePlacements(placements);
+
         events.push({
             type: 'placement-accepted',
-            data: { socketId, round: ofc.round, nextTurnIndex: ofc.currentTurnIndex },
+            data: {
+                socketId,
+                playerName: player.name,
+                round: ofc.round,
+                nextTurnIndex: ofc.currentTurnIndex,
+                placements: placementSummary,
+            },
         });
 
         // Check if all players have placed
@@ -270,9 +279,19 @@ export class OFCGameEngine {
         player.currentCards = [];
         player.hasPlaced = true;
 
+        // 配置情報をまとめる
+        const placementSummary = this.summarizePlacements(placements);
+
         events.push({
             type: 'placement-accepted',
-            data: { socketId: player.socketId, round: ofc.round },
+            data: {
+                socketId: player.socketId,
+                playerName: player.name,
+                round: ofc.round,
+                placements: placementSummary,
+                isFantasyland: true,
+                discardCard,
+            },
         });
 
         if (ofc.players.every(p => p.hasPlaced)) {
@@ -361,9 +380,19 @@ export class OFCGameEngine {
         // ターンを次のプレイヤーに進める
         ofc.currentTurnIndex = this.getNextUnplacedPlayer(ofc);
 
+        // 配置情報をまとめる
+        const placementSummary = this.summarizePlacements(placements);
+
         events.push({
             type: 'placement-accepted',
-            data: { socketId, round: ofc.round, nextTurnIndex: ofc.currentTurnIndex },
+            data: {
+                socketId,
+                playerName: player.name,
+                round: ofc.round,
+                nextTurnIndex: ofc.currentTurnIndex,
+                placements: placementSummary,
+                discardCard,
+            },
         });
 
         if (ofc.players.every(p => p.hasPlaced)) {
@@ -371,6 +400,19 @@ export class OFCGameEngine {
         }
 
         return events;
+    }
+
+    /**
+     * 配置情報をまとめる（ログ表示用）
+     */
+    private summarizePlacements(placements: OFCPlacement[]): { row: string; count: number }[] {
+        const summary: Record<string, number> = { top: 0, middle: 0, bottom: 0 };
+        for (const p of placements) {
+            summary[p.row] = (summary[p.row] || 0) + 1;
+        }
+        return Object.entries(summary)
+            .filter(([, count]) => count > 0)
+            .map(([row, count]) => ({ row, count }));
     }
 
     /**

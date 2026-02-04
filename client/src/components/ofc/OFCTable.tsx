@@ -12,6 +12,8 @@ import { OFCBoard } from './OFCBoard';
 import { OFCCardPlacer } from './OFCCardPlacer';
 import { OFCScoreboard } from './OFCScoreboard';
 import { useOrientation } from '../../hooks/useOrientation';
+import { GameLog, createLogEntry } from '../log/GameLog';
+import type { LogEntry } from '../log/GameLog';
 
 interface OFCTableProps {
   socket: Socket;
@@ -43,6 +45,13 @@ export const OFCTable = memo(function OFCTable({
   const [yourCards, setYourCards] = useState<string[]>([]);
   const [scoringResult, setScoringResult] = useState<OFCRoundScore[] | null>(null);
   const [fantasylandPlayers, setFantasylandPlayers] = useState<string[]>([]);
+  const [gameLogs, setGameLogs] = useState<LogEntry[]>([]);
+  const [isLogCollapsed, setIsLogCollapsed] = useState(false);
+
+  // ログを追加するヘルパー
+  const addLog = useCallback((entry: LogEntry) => {
+    setGameLogs(prev => [...prev.slice(-49), entry]); // 最大50件保持
+  }, []);
 
   const orientation = useOrientation();
   const isPortrait = orientation === 'portrait';
@@ -59,6 +68,14 @@ export const OFCTable = memo(function OFCTable({
     }) => {
       setYourCards(data.yourCards);
       setScoringResult(null);
+
+      // ログ追加
+      if (data.round === 1) {
+        addLog(createLogEntry('event', `--- Hand #${data.ofcState.handNumber} 開始 ---`, { event: 'newhand' }));
+        addLog(createLogEntry('event', '初期5枚を配布', { event: 'deal' }));
+      } else {
+        addLog(createLogEntry('event', `Pineapple R${data.round - 1}: 3枚配布`, { event: 'deal' }));
+      }
     };
 
     const handleOFCScoring = (data: {
@@ -67,22 +84,55 @@ export const OFCTable = memo(function OFCTable({
     }) => {
       setScoringResult(data.scores);
       setFantasylandPlayers(data.fantasylandPlayers);
+
+      // スコアリングログ
+      addLog(createLogEntry('event', '--- ショーダウン ---', { event: 'showdown' }));
+      for (const score of data.scores) {
+        const sign = score.totalPoints >= 0 ? '+' : '';
+        const chipSign = score.chipChange >= 0 ? '+' : '';
+        if (score.isFouled) {
+          addLog(createLogEntry('event', `${score.playerName}: ファウル (${sign}${score.totalPoints}pt, ${chipSign}${score.chipChange})`, { event: 'info' }));
+        } else {
+          addLog(createLogEntry('event', `${score.playerName}: ${sign}${score.totalPoints}pt (${chipSign}${score.chipChange})`, { event: 'win' }));
+        }
+      }
+
+      // FL突入ログ
+      if (data.fantasylandPlayers.length > 0) {
+        for (const flId of data.fantasylandPlayers) {
+          const p = data.scores.find(s => s.playerId === flId);
+          addLog(createLogEntry('event', `🎰 ${p?.playerName || flId} が Fantasyland 突入!`, { event: 'info' }));
+        }
+      }
+    };
+
+    const handleOFCPlaced = (data: {
+      socketId: string;
+      playerName: string;
+      placements: { row: string; count: number }[];
+      discardCard?: string;
+    }) => {
+      const placementStr = data.placements.map(p => `${p.row}×${p.count}`).join(', ');
+      addLog(createLogEntry('action', `${data.playerName} が配置: ${placementStr}`, { playerName: data.playerName }));
     };
 
     const handleOFCError = (data: { reason: string }) => {
       console.warn('OFC error:', data.reason);
+      addLog(createLogEntry('system', `エラー: ${data.reason}`));
     };
 
     socket.on('ofc-deal', handleOFCDeal);
     socket.on('ofc-scoring', handleOFCScoring);
+    socket.on('ofc-placed', handleOFCPlaced);
     socket.on('ofc-error', handleOFCError);
 
     return () => {
       socket.off('ofc-deal', handleOFCDeal);
       socket.off('ofc-scoring', handleOFCScoring);
+      socket.off('ofc-placed', handleOFCPlaced);
       socket.off('ofc-error', handleOFCError);
     };
-  }, [socket]);
+  }, [socket, addLog]);
 
   // Handle card placement
   const handleConfirmPlacement = useCallback((
@@ -540,6 +590,13 @@ export const OFCTable = memo(function OFCTable({
           )}
         </div>
       )}
+
+      {/* ゲームログ */}
+      <GameLog
+        entries={gameLogs}
+        isCollapsed={isLogCollapsed}
+        onToggle={() => setIsLogCollapsed(!isLogCollapsed)}
+      />
     </div>
   );
 });
