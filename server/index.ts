@@ -42,7 +42,7 @@ import {
 } from './stats/sessionTracker.js';
 import { OFCGameEngine } from './OFCGameEngine.js';
 import type { OFCPlacement } from './types.js';
-import { botPlaceInitial, botPlacePineapple, botPlaceFantasyland } from './OFCBot.js';
+import { botPlaceInitial, botPlacePineapple, botPlaceFantasyland, getOFCBotStatus, OFC_BOT_VERSION, OFC_MODEL_VERSION } from './OFCBot.js';
 
 // Phase 3-B: ゲームエンジンインスタンス（部屋ごとに管理）
 const gameEngines: Map<string, GameEngine> = new Map();
@@ -1471,6 +1471,15 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', message: 'Mix Poker Game Server is running' });
 });
 
+// OFC Bot ステータス確認用エンドポイント
+app.get('/api/ofc-bot/status', (_req, res) => {
+  const status = getOFCBotStatus();
+  res.json({
+    serverVersion: '0.4.0',
+    ofcBot: status
+  });
+});
+
 // 本番環境: 静的ファイル配信
 if (isProduction) {
   const clientDistPath = path.join(__dirname, '../../client/dist');
@@ -2761,6 +2770,13 @@ const HOST = '0.0.0.0';
 if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
   httpServer.listen(Number(PORT), HOST, () => {
     console.log(`\n🚀 Server is running on http://${HOST}:${PORT}`);
+    console.log(`📦 Version: 0.4.0`);
+
+    // OFC Bot 状態表示
+    const botStatus = getOFCBotStatus();
+    console.log(`\n🤖 OFC Bot v${botStatus.version}`);
+    console.log(`   Model: ${botStatus.modelVersion}`);
+    console.log(`   AI Enabled: ${botStatus.aiEnabled ? '✅' : '❌'}`);
 
     // プリセットルームを初期化
     roomManager.initializePresetRooms();

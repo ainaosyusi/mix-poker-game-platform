@@ -14,6 +14,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ========================================
+// バージョン情報
+// ========================================
+
+export const OFC_BOT_VERSION = '1.0.0';
+export const OFC_MODEL_VERSION = 'Phase 9 FL Mastery (150M steps)';
+
+// ========================================
 // 設定
 // ========================================
 
@@ -279,13 +286,32 @@ async function initSession(): Promise<void> {
     if (onnxSession) return;
 
     try {
-        console.log(`[OFCBot] Loading ONNX model from ${MODEL_PATH}...`);
+        console.log(`🤖 [OFCBot v${OFC_BOT_VERSION}] Loading ONNX model...`);
+        console.log(`   Model: ${OFC_MODEL_VERSION}`);
         onnxSession = await ort.InferenceSession.create(MODEL_PATH);
-        console.log('[OFCBot] ONNX model loaded successfully');
+        console.log('✅ [OFCBot] AI model loaded successfully');
     } catch (e) {
-        console.error('[OFCBot] Failed to load ONNX model:', e);
+        console.error('❌ [OFCBot] Failed to load ONNX model:', e);
+        console.log('⚠️  [OFCBot] Falling back to heuristic mode');
         onnxSession = null;
     }
+}
+
+/**
+ * AI状態を取得
+ */
+export function getOFCBotStatus(): {
+    version: string;
+    modelVersion: string;
+    aiEnabled: boolean;
+    aiLoaded: boolean;
+} {
+    return {
+        version: OFC_BOT_VERSION,
+        modelVersion: OFC_MODEL_VERSION,
+        aiEnabled: USE_AI,
+        aiLoaded: onnxSession !== null,
+    };
 }
 
 async function runInference(

@@ -1,6 +1,6 @@
 {
   "name": "mix-poker-server",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.6",
