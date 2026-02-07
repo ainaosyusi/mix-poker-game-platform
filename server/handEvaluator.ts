@@ -14,7 +14,7 @@ interface HandRank {
 // ランクを数値に変換
 const rankValue = (rank: string): number => {
     const values: { [key: string]: number } = {
-        '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,
+        '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, 'T': 10, '10': 10,
         'J': 11, 'Q': 12, 'K': 13, 'A': 14
     };
     return values[rank] || 0;
@@ -60,8 +60,11 @@ export const evaluateHand = (hand: Card[]): HandRank => {
     }
 
     const counts = countRanks(hand);
-    const values = Array.from(counts.keys()).sort((a, b) => b - a);
-    const countArray = Array.from(counts.values()).sort((a, b) => b - a);
+    // カウント降順 → 同カウント内はランク降順でソート（ペアのランクがキッカーより先に来る）
+    const sortedEntries = Array.from(counts.entries())
+        .sort((a, b) => b[1] !== a[1] ? b[1] - a[1] : b[0] - a[0]);
+    const values = sortedEntries.map(([rank]) => rank);
+    const countArray = sortedEntries.map(([, count]) => count);
 
     const flush = isFlush(hand);
     const straight = isStraight(hand);

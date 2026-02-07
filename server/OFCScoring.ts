@@ -482,9 +482,9 @@ export function calculateOFCScores(
             topRoyalties: isFouled ? 0 : getTopRoyalties(topCards),
             middleRoyalties: isFouled ? 0 : getMiddleRoyalties(middleCards),
             bottomRoyalties: isFouled ? 0 : getBottomRoyalties(bottomCards),
-            topHand: isFouled ? 'FOUL' : resolveJokersForThreeCards(topCards).name,
-            middleHand: isFouled ? 'FOUL' : resolveJokersForFiveCards(middleCards).name,
-            bottomHand: isFouled ? 'FOUL' : resolveJokersForFiveCards(bottomCards).name,
+            topHand: p.board.top.length === 3 ? resolveJokersForThreeCards(topCards).name : 'Incomplete',
+            middleHand: p.board.middle.length === 5 ? resolveJokersForFiveCards(middleCards).name : 'Incomplete',
+            bottomHand: p.board.bottom.length === 5 ? resolveJokersForFiveCards(bottomCards).name : 'Incomplete',
             points: 0,
         };
     });
