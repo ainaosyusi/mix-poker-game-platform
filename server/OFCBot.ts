@@ -17,8 +17,8 @@ const __dirname = path.dirname(__filename);
 // バージョン情報
 // ========================================
 
-export const OFC_BOT_VERSION = '1.0.0';
-export const OFC_MODEL_VERSION = 'Phase 9 FL Mastery (150M steps)';
+export const OFC_BOT_VERSION = '1.1.0';
+export const OFC_MODEL_VERSION = 'Phase 9 FL Mastery (250M steps)';
 
 // ========================================
 // 設定
