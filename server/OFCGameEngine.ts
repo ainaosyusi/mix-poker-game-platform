@@ -23,6 +23,9 @@ function createDeck(): string[] {
             deck.push(rank + suit);
         }
     }
+    // Add 2 Jokers (fully wild)
+    deck.push('JK1');
+    deck.push('JK2');
     // Fisher-Yates shuffle
     for (let i = deck.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));

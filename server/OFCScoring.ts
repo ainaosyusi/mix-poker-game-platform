@@ -1,15 +1,23 @@
 // ========================================
 // OFC Scoring Engine
 // Pineapple OFC - JOPT Standard Scoring
+// Joker対応: 完全ワイルド (JK1, JK2)
 // ========================================
 
-import { evaluateHand, compareHands } from './handEvaluator.js';
+import { evaluateHand } from './handEvaluator.js';
 import type { OFCRow, OFCPlayerState, OFCRoundScore } from './types.js';
 
 // Card interface (matching handEvaluator)
 interface Card {
     suit: string;
     rank: string;
+}
+
+// HandRank interface (matching handEvaluator)
+interface HandRank {
+    rank: number;
+    name: string;
+    highCards: number[];
 }
 
 // 3-card hand rank (Top row)
@@ -20,10 +28,38 @@ interface ThreeCardHandRank {
 }
 
 // ========================================
+// Joker Helpers
+// ========================================
+
+function isJoker(cardStr: string): boolean {
+    return cardStr === 'JK1' || cardStr === 'JK2';
+}
+
+function isJokerCard(card: Card): boolean {
+    return card.rank === 'JOKER';
+}
+
+const ALL_SUITS = ['♠', '♥', '♦', '♣'];
+const ALL_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'];
+
+function allStandardCards(): Card[] {
+    const cards: Card[] = [];
+    for (const suit of ALL_SUITS) {
+        for (const rank of ALL_RANKS) {
+            cards.push({ rank, suit });
+        }
+    }
+    return cards;
+}
+
+// ========================================
 // Card Parsing
 // ========================================
 
 function parseCard(cardStr: string): Card {
+    if (isJoker(cardStr)) {
+        return { rank: 'JOKER', suit: cardStr };
+    }
     // "Ah" → { rank: 'A', suit: 'h' }
     // "Td" → { rank: 'T', suit: 'd' }
     return { rank: cardStr[0], suit: cardStr.slice(1) };
@@ -50,6 +86,30 @@ const rankName = (val: number): string => {
     };
     return names[val] || '?';
 };
+
+// ========================================
+// HandRank Comparison Helpers
+// ========================================
+
+function isHandBetter(a: HandRank, b: HandRank): boolean {
+    if (a.rank > b.rank) return true;
+    if (a.rank < b.rank) return false;
+    for (let i = 0; i < Math.min(a.highCards.length, b.highCards.length); i++) {
+        if (a.highCards[i] > b.highCards[i]) return true;
+        if (a.highCards[i] < b.highCards[i]) return false;
+    }
+    return false;
+}
+
+function isThreeCardHandBetter(a: ThreeCardHandRank, b: ThreeCardHandRank): boolean {
+    if (a.rank > b.rank) return true;
+    if (a.rank < b.rank) return false;
+    for (let i = 0; i < Math.min(a.highCards.length, b.highCards.length); i++) {
+        if (a.highCards[i] > b.highCards[i]) return true;
+        if (a.highCards[i] < b.highCards[i]) return false;
+    }
+    return false;
+}
 
 // ========================================
 // 3-Card Hand Evaluation (Top Row)
@@ -105,12 +165,137 @@ export function compareThreeCardHands(hand1: ThreeCardHandRank, hand2: ThreeCard
 }
 
 // ========================================
+// Joker Resolution (Wild Card)
+// ========================================
+
+/**
+ * 5枚ハンドのJokerを解決して最強のHandRankを返す
+ * Jokerがない場合は通常のevaluateHandに委譲
+ */
+function resolveJokersForFiveCards(cards: Card[]): HandRank {
+    const jokerIndices: number[] = [];
+    const regularCards: Card[] = [];
+
+    for (let i = 0; i < cards.length; i++) {
+        if (isJokerCard(cards[i])) {
+            jokerIndices.push(i);
+        } else {
+            regularCards.push(cards[i]);
+        }
+    }
+
+    if (jokerIndices.length === 0) {
+        return evaluateHand(cards);
+    }
+
+    // 候補: 52枚の通常カードからハンド内の通常カードを除外
+    const regularSet = new Set(regularCards.map(c => c.rank + c.suit));
+    const candidates = allStandardCards().filter(c => !regularSet.has(c.rank + c.suit));
+
+    let bestHand: HandRank = { rank: -1, name: '', highCards: [] };
+
+    if (jokerIndices.length === 1) {
+        for (const sub of candidates) {
+            const testHand = [...cards];
+            testHand[jokerIndices[0]] = sub;
+            const result = evaluateHand(testHand);
+            if (isHandBetter(result, bestHand)) {
+                bestHand = result;
+            }
+        }
+    } else {
+        // 2 Jokers: 全ペアの組み合わせ (i < j で異なるカードのみ)
+        for (let i = 0; i < candidates.length; i++) {
+            for (let j = i + 1; j < candidates.length; j++) {
+                const testHand = [...cards];
+                testHand[jokerIndices[0]] = candidates[i];
+                testHand[jokerIndices[1]] = candidates[j];
+                const result = evaluateHand(testHand);
+                if (isHandBetter(result, bestHand)) {
+                    bestHand = result;
+                }
+            }
+        }
+    }
+
+    return bestHand;
+}
+
+/**
+ * 3枚ハンドのJokerを解決して最強のThreeCardHandRankを返す
+ * Jokerがない場合は通常のevaluateThreeCardHandに委譲
+ */
+function resolveJokersForThreeCards(cards: Card[]): ThreeCardHandRank {
+    const jokerIndices: number[] = [];
+    const regularCards: Card[] = [];
+
+    for (let i = 0; i < cards.length; i++) {
+        if (isJokerCard(cards[i])) {
+            jokerIndices.push(i);
+        } else {
+            regularCards.push(cards[i]);
+        }
+    }
+
+    if (jokerIndices.length === 0) {
+        return evaluateThreeCardHand(cards);
+    }
+
+    const regularSet = new Set(regularCards.map(c => c.rank + c.suit));
+    const candidates = allStandardCards().filter(c => !regularSet.has(c.rank + c.suit));
+
+    let bestHand: ThreeCardHandRank = { rank: -1, name: '', highCards: [] };
+
+    if (jokerIndices.length === 1) {
+        for (const sub of candidates) {
+            const testHand = [...cards];
+            testHand[jokerIndices[0]] = sub;
+            const result = evaluateThreeCardHand(testHand);
+            if (isThreeCardHandBetter(result, bestHand)) {
+                bestHand = result;
+            }
+        }
+    } else {
+        // 2 Jokers
+        for (let i = 0; i < candidates.length; i++) {
+            for (let j = i + 1; j < candidates.length; j++) {
+                const testHand = [...cards];
+                testHand[jokerIndices[0]] = candidates[i];
+                testHand[jokerIndices[1]] = candidates[j];
+                const result = evaluateThreeCardHand(testHand);
+                if (isThreeCardHandBetter(result, bestHand)) {
+                    bestHand = result;
+                }
+            }
+        }
+    }
+
+    return bestHand;
+}
+
+// ========================================
+// Joker-Aware Comparison
+// ========================================
+
+function compareHandsJokerAware(cards1: Card[], cards2: Card[]): number {
+    const hand1 = resolveJokersForFiveCards(cards1);
+    const hand2 = resolveJokersForFiveCards(cards2);
+    if (hand1.rank > hand2.rank) return 1;
+    if (hand1.rank < hand2.rank) return -1;
+    for (let i = 0; i < Math.min(hand1.highCards.length, hand2.highCards.length); i++) {
+        if (hand1.highCards[i] > hand2.highCards[i]) return 1;
+        if (hand1.highCards[i] < hand2.highCards[i]) return -1;
+    }
+    return 0;
+}
+
+// ========================================
 // Royalty Calculations (JOPT Standard)
 // ========================================
 
 /** Top Row Royalties (3 cards) */
 export function getTopRoyalties(cards: Card[]): number {
-    const hand = evaluateThreeCardHand(cards);
+    const hand = resolveJokersForThreeCards(cards);
 
     // Trips: 222=10, 333=11, ..., AAA=22
     if (hand.rank === 3) {
@@ -130,7 +315,7 @@ export function getTopRoyalties(cards: Card[]): number {
 
 /** Middle Row Royalties (5 cards) */
 export function getMiddleRoyalties(cards: Card[]): number {
-    const hand = evaluateHand(cards);
+    const hand = resolveJokersForFiveCards(cards);
 
     switch (hand.rank) {
         case 3: return 2;   // Three of a Kind
@@ -149,7 +334,7 @@ export function getMiddleRoyalties(cards: Card[]): number {
 
 /** Bottom Row Royalties (5 cards) */
 export function getBottomRoyalties(cards: Card[]): number {
-    const hand = evaluateHand(cards);
+    const hand = resolveJokersForFiveCards(cards);
 
     switch (hand.rank) {
         case 4: return 2;   // Straight
@@ -181,13 +366,13 @@ export function checkFoul(board: OFCRow): boolean {
     const middleCards = parseCards(board.middle);
     const bottomCards = parseCards(board.bottom);
 
-    // Bottom must be >= Middle (both 5-card)
-    const bottomVsMiddle = compareHands(bottomCards, middleCards);
+    // Bottom must be >= Middle (both 5-card, Joker-aware)
+    const bottomVsMiddle = compareHandsJokerAware(bottomCards, middleCards);
     if (bottomVsMiddle < 0) return true;
 
     // Middle must be >= Top (5-card vs 3-card)
-    const middleHand = evaluateHand(middleCards);
-    const topHand = evaluateThreeCardHand(topCards);
+    const middleHand = resolveJokersForFiveCards(middleCards);
+    const topHand = resolveJokersForThreeCards(topCards);
 
     // Compare by abstract hand rank (3-card rank numbers align with 5-card)
     if (middleHand.rank < topHand.rank) return true;
@@ -211,7 +396,7 @@ export function checkFantasylandEntry(board: OFCRow, isFouled: boolean): boolean
     if (isFouled) return false;
     if (board.top.length !== 3) return false;
 
-    const hand = evaluateThreeCardHand(parseCards(board.top));
+    const hand = resolveJokersForThreeCards(parseCards(board.top));
 
     // Trips always qualifies
     if (hand.rank === 3) return true;
@@ -230,15 +415,15 @@ export function checkFantasylandContinuation(board: OFCRow, isFouled: boolean): 
     }
 
     // Top: Trips or better
-    const topHand = evaluateThreeCardHand(parseCards(board.top));
+    const topHand = resolveJokersForThreeCards(parseCards(board.top));
     if (topHand.rank >= 3) return true;
 
     // Middle: Full House or better (rank 6+)
-    const middleHand = evaluateHand(parseCards(board.middle));
+    const middleHand = resolveJokersForFiveCards(parseCards(board.middle));
     if (middleHand.rank >= 6) return true;
 
     // Bottom: Quads or better (rank 7+)
-    const bottomHand = evaluateHand(parseCards(board.bottom));
+    const bottomHand = resolveJokersForFiveCards(parseCards(board.bottom));
     if (bottomHand.rank >= 7) return true;
 
     return false;
@@ -250,17 +435,17 @@ export function checkFantasylandContinuation(board: OFCRow, isFouled: boolean): 
 
 function compareTopRow(board1: OFCRow, board2: OFCRow): number {
     return compareThreeCardHands(
-        evaluateThreeCardHand(parseCards(board1.top)),
-        evaluateThreeCardHand(parseCards(board2.top)),
+        resolveJokersForThreeCards(parseCards(board1.top)),
+        resolveJokersForThreeCards(parseCards(board2.top)),
     );
 }
 
 function compareMiddleRow(board1: OFCRow, board2: OFCRow): number {
-    return compareHands(parseCards(board1.middle), parseCards(board2.middle));
+    return compareHandsJokerAware(parseCards(board1.middle), parseCards(board2.middle));
 }
 
 function compareBottomRow(board1: OFCRow, board2: OFCRow): number {
-    return compareHands(parseCards(board1.bottom), parseCards(board2.bottom));
+    return compareHandsJokerAware(parseCards(board1.bottom), parseCards(board2.bottom));
 }
 
 // ========================================
@@ -297,9 +482,9 @@ export function calculateOFCScores(
             topRoyalties: isFouled ? 0 : getTopRoyalties(topCards),
             middleRoyalties: isFouled ? 0 : getMiddleRoyalties(middleCards),
             bottomRoyalties: isFouled ? 0 : getBottomRoyalties(bottomCards),
-            topHand: isFouled ? 'FOUL' : evaluateThreeCardHand(topCards).name,
-            middleHand: isFouled ? 'FOUL' : evaluateHand(middleCards).name,
-            bottomHand: isFouled ? 'FOUL' : evaluateHand(bottomCards).name,
+            topHand: isFouled ? 'FOUL' : resolveJokersForThreeCards(topCards).name,
+            middleHand: isFouled ? 'FOUL' : resolveJokersForFiveCards(middleCards).name,
+            bottomHand: isFouled ? 'FOUL' : resolveJokersForFiveCards(bottomCards).name,
             points: 0,
         };
     });

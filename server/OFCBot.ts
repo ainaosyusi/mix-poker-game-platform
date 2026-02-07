@@ -47,6 +47,10 @@ const SUIT_SYMBOLS: Record<string, string> = { '♠': 's', '♥': 'h', '♦': 'd
  * 'As' or 'A♠' → 0 (ACE of SPADES)
  */
 function cardToIndex(card: string): number {
+    // Joker mapping
+    if (card === 'JK1') return 52;
+    if (card === 'JK2') return 53;
+
     if (card.length < 2) return -1;
 
     const rankChar = card[0].toUpperCase();
@@ -72,7 +76,7 @@ function cardToIndex(card: string): number {
 
 const OBS_DIM = 881;
 const ACTION_DIM = 243;
-const NUM_CARDS = 54;  // 学習時は54枚（Joker含む）、実際は52枚のみ使用
+const NUM_CARDS = 54;  // 54枚デッキ（Joker 2枚含む）
 
 /**
  * ゲーム状態から881次元の観測ベクトルを生成
@@ -339,6 +343,8 @@ async function runInference(
 // ========================================
 
 const rankVal = (card: string): number => {
+    // Jokers are the highest value for heuristic sorting
+    if (card === 'JK1' || card === 'JK2') return 15;
     const r = card[0];
     const values: Record<string, number> = {
         '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8,

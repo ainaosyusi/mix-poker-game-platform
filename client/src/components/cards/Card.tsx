@@ -20,8 +20,14 @@ const isFaceCard = (rank: string): boolean => rank === 'J' || rank === 'Q' || ra
 // エース（A）判定
 const isAce = (rank: string): boolean => rank === 'A';
 
+// Joker判定
+const isJokerCard = (card: string): boolean => card === 'JK1' || card === 'JK2';
+
 // カードをパース
 function parseCard(card: string): { rank: string; suit: string } {
+  if (isJokerCard(card)) {
+    return { rank: 'JOKER', suit: card };
+  }
   if (card.length === 2) {
     return { rank: card[0], suit: card[1] };
   }
@@ -84,6 +90,65 @@ export const Card = memo(function Card({
   }
 
   const { rank, suit } = parseCard(card);
+
+  // Jokerカード専用レンダリング
+  if (rank === 'JOKER') {
+    const isRedJoker = suit === 'JK1';
+    const jokerColor = isRedJoker ? '#dc2626' : '#6b21a8';
+    return (
+      <div style={{
+        width: s.width, height: s.height,
+        background: '#ffffff',
+        borderRadius: s.borderRadius,
+        border: '1px solid #d0d0d0',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.15), 0 1px 1px rgba(0,0,0,0.1)',
+        position: 'relative',
+        userSelect: 'none',
+        overflow: 'hidden',
+        transition: animate ? 'transform 0.2s' : undefined,
+      }}>
+        {/* 左上コーナー */}
+        <div style={{
+          position: 'absolute', top: s.padding, left: s.padding,
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          lineHeight: 0.9, zIndex: 2,
+        }}>
+          <span style={{
+            fontSize: s.rankSize * 0.7, fontWeight: 900, color: jokerColor,
+            fontFamily: 'Arial Black, "Helvetica Neue", Helvetica, sans-serif',
+          }}>&#9733;</span>
+        </div>
+        {/* 中央 */}
+        <div style={{
+          position: 'absolute', top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1,
+        }}>
+          <div style={{ fontSize: s.centerSize * 1.2, color: jokerColor }}>
+            &#x1F0CF;
+          </div>
+          <div style={{
+            fontSize: Math.max(7, s.rankSize * 0.28), fontWeight: 800,
+            color: jokerColor, letterSpacing: 1, marginTop: 2,
+          }}>JOKER</div>
+        </div>
+        {/* 右下コーナー */}
+        <div style={{
+          position: 'absolute', bottom: s.padding, right: s.padding,
+          transform: 'rotate(180deg)',
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          lineHeight: 0.9, zIndex: 2,
+        }}>
+          <span style={{
+            fontSize: s.rankSize * 0.7, fontWeight: 900, color: jokerColor,
+            fontFamily: 'Arial Black, "Helvetica Neue", Helvetica, sans-serif',
+          }}>&#9733;</span>
+        </div>
+      </div>
+    );
+  }
+
   const sc = suitConfig[suit] || suitConfig['s'];
   const rankDisplay = getRankDisplay(rank);
   const isPictureOrAce = isFaceCard(rank) || isAce(rank);
