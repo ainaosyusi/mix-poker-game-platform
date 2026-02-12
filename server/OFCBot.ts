@@ -17,8 +17,8 @@ const __dirname = path.dirname(__filename);
 // バージョン情報
 // ========================================
 
-export const OFC_BOT_VERSION = '1.2.0';
-export const OFC_MODEL_VERSION = 'Phase 10 FL Stay (56M steps)';
+export const OFC_BOT_VERSION = '1.3.0';
+export const OFC_MODEL_VERSION = 'Phase 9 FL Mastery (250M steps)';
 
 // ========================================
 // 設定
@@ -38,7 +38,7 @@ let sessionInitPromise: Promise<void> | null = null;
 // カード変換
 // ========================================
 
-const RANKS = '23456789TJQKA';
+const RANKS = 'A23456789TJQK';  // A=0, 2=1, ..., K=12 (C++エンジンと一致)
 const SUITS = 'shdc';  // spade, heart, diamond, club
 const SUIT_SYMBOLS: Record<string, string> = { '♠': 's', '♥': 'h', '♦': 'd', '♣': 'c' };
 
@@ -80,89 +80,25 @@ const NUM_CARDS = 54;  // 54枚デッキ（Joker 2枚含む）
 
 /**
  * ゲーム状態から881次元の観測ベクトルを生成
+ * @param round - OFCゲームのラウンド番号 (1=initial, 2-5=pineapple)
  */
 function buildObservation(
     cards: string[],
     board: OFCRow,
     opponentBoards: OFCRow[],
-    phase: 'initial' | 'pineapple'
+    round: number
 ): Float32Array {
     const obs = new Float32Array(OBS_DIM);
     let offset = 0;
 
-    // my_board: 3 * 54 = 162
-    const myBoardOffset = offset;
-    for (const [rowIdx, rowCards] of [board.top, board.middle, board.bottom].entries()) {
-        for (const card of rowCards) {
-            const idx = cardToIndex(card);
-            if (idx >= 0 && idx < NUM_CARDS) {
-                obs[myBoardOffset + rowIdx * NUM_CARDS + idx] = 1;
-            }
-        }
-    }
-    offset += 3 * NUM_CARDS;  // 162
-
-    // my_hand: 5 * 54 = 270
-    const myHandOffset = offset;
-    for (let i = 0; i < Math.min(5, cards.length); i++) {
-        const idx = cardToIndex(cards[i]);
-        if (idx >= 0 && idx < NUM_CARDS) {
-            obs[myHandOffset + i * NUM_CARDS + idx] = 1;
-        }
-    }
-    offset += 5 * NUM_CARDS;  // 270
-
-    // next_opponent_board: 3 * 54 = 162
-    const nextOppOffset = offset;
-    if (opponentBoards.length > 0) {
-        const opp = opponentBoards[0];
-        for (const [rowIdx, rowCards] of [opp.top, opp.middle, opp.bottom].entries()) {
-            for (const card of rowCards) {
-                const idx = cardToIndex(card);
-                if (idx >= 0 && idx < NUM_CARDS) {
-                    obs[nextOppOffset + rowIdx * NUM_CARDS + idx] = 1;
-                }
-            }
-        }
-    }
-    offset += 3 * NUM_CARDS;  // 162
-
-    // prev_opponent_board: 3 * 54 = 162
-    const prevOppOffset = offset;
-    if (opponentBoards.length > 1) {
-        const opp = opponentBoards[1];
-        for (const [rowIdx, rowCards] of [opp.top, opp.middle, opp.bottom].entries()) {
-            for (const card of rowCards) {
-                const idx = cardToIndex(card);
-                if (idx >= 0 && idx < NUM_CARDS) {
-                    obs[prevOppOffset + rowIdx * NUM_CARDS + idx] = 1;
-                }
-            }
-        }
-    }
-    offset += 3 * NUM_CARDS;  // 162
-
-    // my_discards: 54 (未使用、ゼロ)
-    offset += NUM_CARDS;  // 54
-
-    // unseen_probability: 54 (均等)
-    const unseenOffset = offset;
-    for (let i = 0; i < NUM_CARDS; i++) {
-        obs[unseenOffset + i] = 1.0 / NUM_CARDS;
-    }
-    offset += NUM_CARDS;  // 54
-
-    // position_info: 3 (one-hot, ボタン位置)
-    obs[offset] = 1;  // ボタン
-    offset += 3;
-
-    // game_state: 14
-    const street = phase === 'initial' ? 1 : 2;
-    obs[offset++] = street;
+    // ★ アルファベット順でflatten（Python学習環境のsorted(obs.keys())と一致）
+    // 1. game_state: 14
+    // Python (ofc_3max_env): current_street = 1 (initial), 2-5 (pineapple)
+    // = OFC engine round そのまま
+    obs[offset++] = round;
     obs[offset++] = board.top.length;
     obs[offset++] = board.middle.length;
     obs[offset++] = board.bottom.length;
-    // 相手のボード情報（簡略化）
     if (opponentBoards.length > 0) {
         obs[offset++] = opponentBoards[0].top.length;
         obs[offset++] = opponentBoards[0].middle.length;
@@ -179,6 +115,104 @@ function buildObservation(
     }
     // FL情報（0固定）
     offset += 4;
+    // offset = 14
+
+    // 2. my_board: 3 * 54 = 162
+    const myBoardOffset = offset;
+    for (const [rowIdx, rowCards] of [board.top, board.middle, board.bottom].entries()) {
+        for (const card of rowCards) {
+            const idx = cardToIndex(card);
+            if (idx >= 0 && idx < NUM_CARDS) {
+                obs[myBoardOffset + rowIdx * NUM_CARDS + idx] = 1;
+            }
+        }
+    }
+    offset += 3 * NUM_CARDS;  // offset = 176
+
+    // 3. my_discards: 54 (未使用、ゼロ)
+    offset += NUM_CARDS;  // offset = 230
+
+    // 4. my_hand: 5 * 54 = 270
+    const myHandOffset = offset;
+    for (let i = 0; i < Math.min(5, cards.length); i++) {
+        const idx = cardToIndex(cards[i]);
+        if (idx >= 0 && idx < NUM_CARDS) {
+            obs[myHandOffset + i * NUM_CARDS + idx] = 1;
+        }
+    }
+    offset += 5 * NUM_CARDS;  // offset = 500
+
+    // 5. next_opponent_board: 3 * 54 = 162
+    const nextOppOffset = offset;
+    if (opponentBoards.length > 0) {
+        const opp = opponentBoards[0];
+        for (const [rowIdx, rowCards] of [opp.top, opp.middle, opp.bottom].entries()) {
+            for (const card of rowCards) {
+                const idx = cardToIndex(card);
+                if (idx >= 0 && idx < NUM_CARDS) {
+                    obs[nextOppOffset + rowIdx * NUM_CARDS + idx] = 1;
+                }
+            }
+        }
+    }
+    offset += 3 * NUM_CARDS;  // offset = 662
+
+    // 6. position_info: 3 (one-hot, ボタン位置)
+    obs[offset] = 1;  // ボタン
+    offset += 3;  // offset = 665
+
+    // 7. prev_opponent_board: 3 * 54 = 162
+    const prevOppOffset = offset;
+    if (opponentBoards.length > 1) {
+        const opp = opponentBoards[1];
+        for (const [rowIdx, rowCards] of [opp.top, opp.middle, opp.bottom].entries()) {
+            for (const card of rowCards) {
+                const idx = cardToIndex(card);
+                if (idx >= 0 && idx < NUM_CARDS) {
+                    obs[prevOppOffset + rowIdx * NUM_CARDS + idx] = 1;
+                }
+            }
+        }
+    }
+    offset += 3 * NUM_CARDS;  // offset = 827
+
+    // 8. unseen_probability: 54 (見えていないカードの確率分布)
+    const seen = new Uint8Array(NUM_CARDS);
+
+    // 自分のボード
+    for (const rowCards of [board.top, board.middle, board.bottom]) {
+        for (const card of rowCards) {
+            const idx = cardToIndex(card);
+            if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
+        }
+    }
+    // 自分のハンド
+    for (const card of cards) {
+        const idx = cardToIndex(card);
+        if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
+    }
+    // 相手のボード
+    for (const opp of opponentBoards) {
+        for (const rowCards of [opp.top, opp.middle, opp.bottom]) {
+            for (const card of rowCards) {
+                const idx = cardToIndex(card);
+                if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
+            }
+        }
+    }
+
+    let unseenCount = 0;
+    for (let i = 0; i < NUM_CARDS; i++) {
+        if (!seen[i]) unseenCount++;
+    }
+    const unseenOffset = offset;
+    if (unseenCount > 0) {
+        const prob = 1.0 / unseenCount;
+        for (let i = 0; i < NUM_CARDS; i++) {
+            obs[unseenOffset + i] = seen[i] ? 0 : prob;
+        }
+    }
+    offset += NUM_CARDS;  // offset = 881
 
     return obs;
 }
@@ -217,6 +251,7 @@ function buildActionMask(
         }
     } else {
         // Pineapple: 3枚から2枚配置、1枚捨て
+        // ofc_3max_env.py: action = discard_idx * 9 + row2 * 3 + row1
         for (let discardIdx = 0; discardIdx < Math.min(3, cards.length); discardIdx++) {
             for (let placementAction = 0; placementAction < 9; placementAction++) {
                 const row1 = placementAction % 3;
@@ -262,6 +297,7 @@ function decodeAction(
             placements.push({ card: cards[i], row: rowNames[rowIdx] });
         }
     } else {
+        // ofc_3max_env.py: action = discard_idx * 9 + row2 * 3 + row1
         const row1 = action % 3;
         const row2 = Math.floor(action / 3) % 3;
         const discardIdx = Math.floor(action / 9) % 3;
@@ -418,7 +454,7 @@ export async function botPlaceInitial(
 
     try {
         const board: OFCRow = { top: [], middle: [], bottom: [] };
-        const obs = buildObservation(cards, board, opponentBoards, 'initial');
+        const obs = buildObservation(cards, board, opponentBoards, 1);  // round=1 (initial)
         const mask = buildActionMask(cards, board, 'initial');
         const action = await runInference(obs, mask);
         const { placements } = decodeAction(action, cards, 'initial');
@@ -431,11 +467,13 @@ export async function botPlaceInitial(
 
 /**
  * Pineappleラウンド（3枚→2枚配置+1枚捨て）
+ * @param round - OFCゲームのラウンド番号 (2-5)
  */
 export async function botPlacePineapple(
     cards: string[],
     currentBoard: OFCRow,
-    opponentBoards: OFCRow[] = []
+    opponentBoards: OFCRow[] = [],
+    round: number = 2
 ): Promise<{ placements: OFCPlacement[]; discard: string }> {
     if (!USE_AI) {
         return heuristicPlacePineapple(cards, currentBoard);
@@ -452,7 +490,7 @@ export async function botPlacePineapple(
     }
 
     try {
-        const obs = buildObservation(cards, currentBoard, opponentBoards, 'pineapple');
+        const obs = buildObservation(cards, currentBoard, opponentBoards, round);
         const mask = buildActionMask(cards, currentBoard, 'pineapple');
         const action = await runInference(obs, mask);
         const { placements, discard } = decodeAction(action, cards, 'pineapple');

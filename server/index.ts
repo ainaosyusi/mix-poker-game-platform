@@ -667,7 +667,7 @@ function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: O
       }
     } else if (currentRoom.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
       // Pineappleラウンド: 3枚→2枚配置+1捨て
-      const { placements, discard } = await botPlacePineapple(cp.currentCards, cp.board, opponentBoards);
+      const { placements, discard } = await botPlacePineapple(cp.currentCards, cp.board, opponentBoards, currentRoom.ofcState.round);
       events = engine.placePineappleCards(currentRoom, cp.socketId, placements, discard);
     }
     if (events) processOFCEvents(roomId, currentRoom, io, engine, events);
