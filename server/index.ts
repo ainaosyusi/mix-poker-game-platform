@@ -650,25 +650,47 @@ function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: O
     const cp = currentRoom.ofcState.players[currentRoom.ofcState.currentTurnIndex];
     if (!cp || !cp.isBot || cp.hasPlaced) return;
 
-    // 相手のボード情報を収集（AI推論用）
-    const opponentBoards = currentRoom.ofcState.players
-      .filter((p: any) => p && p.socketId !== cp.socketId)
-      .map((p: any) => p.board);
+    // 相手のボード情報を収集（学習環境と同じ順序: next(下家), prev(上家)）
+    const ofc = currentRoom.ofcState;
+    const playerIdx = ofc.currentTurnIndex;
+    const N = ofc.players.length;
+    const nextIdx = (playerIdx + 1) % N;
+    const prevIdx = (playerIdx - 1 + N) % N;
+    const opponentBoards = N >= 3
+      ? [ofc.players[nextIdx].board, ofc.players[prevIdx].board]
+      : [ofc.players[nextIdx].board];
+
+    // ボタンからの相対位置
+    const playerPosition = ((playerIdx - ofc.buttonIndex) % N + N) % N;
+
+    // 自分の捨て札履歴（カードインデックス配列）
+    const discards: number[] = (cp as any)._botDiscards || [];
 
     let events;
-    if (currentRoom.ofcState.phase === 'OFC_INITIAL_PLACING') {
+    if (ofc.phase === 'OFC_INITIAL_PLACING') {
       // 初期ラウンド: 5枚配置 (FL時は14枚→13枚+1捨て)
       if (cp.isFantasyland && cp.fantasyCandidateCards) {
         const { placements, discard } = botPlaceFantasyland(cp.fantasyCandidateCards);
         events = engine.placeInitialCards(currentRoom, cp.socketId, placements, discard);
       } else {
-        const placements = await botPlaceInitial(cp.currentCards, opponentBoards);
+        const placements = await botPlaceInitial(cp.currentCards, opponentBoards, playerPosition);
         events = engine.placeInitialCards(currentRoom, cp.socketId, placements);
       }
-    } else if (currentRoom.ofcState.phase === 'OFC_PINEAPPLE_PLACING') {
+    } else if (ofc.phase === 'OFC_PINEAPPLE_PLACING') {
       // Pineappleラウンド: 3枚→2枚配置+1捨て
-      const { placements, discard } = await botPlacePineapple(cp.currentCards, cp.board, opponentBoards, currentRoom.ofcState.round);
+      const { placements, discard } = await botPlacePineapple(
+        cp.currentCards, cp.board, opponentBoards, ofc.round, playerPosition, discards
+      );
       events = engine.placePineappleCards(currentRoom, cp.socketId, placements, discard);
+      // 捨て札を記録
+      if (discard) {
+        const { cardToIndex } = await import('./OFCBot.js');
+        const discardIdx = cardToIndex(discard);
+        if (discardIdx >= 0) {
+          if (!(cp as any)._botDiscards) (cp as any)._botDiscards = [];
+          (cp as any)._botDiscards.push(discardIdx);
+        }
+      }
     }
     if (events) processOFCEvents(roomId, currentRoom, io, engine, events);
   }, delay);

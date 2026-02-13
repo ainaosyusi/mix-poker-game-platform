@@ -1,23 +1,37 @@
 // ========================================
 // OFC Bot Simulation Test
-// Plays N hands between 2 bots and reports statistics
+// Plays N hands between N bots and reports statistics
 // ========================================
 
 import { OFCGameEngine } from '../OFCGameEngine.js';
-import { botPlaceInitial, botPlacePineapple, botPlaceFantasyland } from '../OFCBot.js';
+import { botPlaceInitial, botPlacePineapple, botPlaceFantasyland, cardToIndex } from '../OFCBot.js';
 import { calculateOFCScores } from '../OFCScoring.js';
 import type { Room, OFCGameState } from '../types.js';
 
 const NUM_HANDS = 200;
+const NUM_PLAYERS = parseInt(process.argv[2] || '3', 10);
 
 // ========================================
 // Create a minimal Room for simulation
 // ========================================
-function createTestRoom(): Room {
+function createTestRoom(numPlayers: number): Room {
+    const players = [];
+    for (let i = 0; i < numPlayers; i++) {
+        players.push({
+            socketId: `bot-${i + 1}`,
+            name: `Bot ${String.fromCharCode(65 + i)}`,
+            stack: 10000,
+            bet: 0,
+            totalBet: 0,
+            status: 'ACTIVE',
+            hand: null,
+        });
+    }
+
     return {
         id: 'sim-001',
         config: {
-            maxPlayers: 2,
+            maxPlayers: numPlayers,
             smallBlind: 1,
             bigBlind: 2,
         },
@@ -32,26 +46,7 @@ function createTestRoom(): Room {
             minRaise: 0,
             handNumber: 0,
         },
-        players: [
-            {
-                socketId: 'bot-1',
-                name: 'Bot A',
-                stack: 10000,
-                bet: 0,
-                totalBet: 0,
-                status: 'ACTIVE',
-                hand: null,
-            },
-            {
-                socketId: 'bot-2',
-                name: 'Bot B',
-                stack: 10000,
-                bet: 0,
-                totalBet: 0,
-                status: 'ACTIVE',
-                hand: null,
-            },
-        ],
+        players,
         dealerBtnIndex: 0,
         activePlayerIndex: -1,
         streetStarterIndex: -1,
@@ -71,14 +66,66 @@ function createTestRoom(): Room {
 }
 
 // ========================================
+// Per-player discard tracking
+// ========================================
+const playerDiscards: Map<string, number[]> = new Map();
+
+function resetDiscards(numPlayers: number) {
+    playerDiscards.clear();
+    for (let i = 0; i < numPlayers; i++) {
+        playerDiscards.set(`bot-${i + 1}`, []);
+    }
+}
+
+function recordDiscard(socketId: string, cardStr: string) {
+    const idx = cardToIndex(cardStr);
+    if (idx >= 0) {
+        const arr = playerDiscards.get(socketId) || [];
+        arr.push(idx);
+        playerDiscards.set(socketId, arr);
+    }
+}
+
+// ========================================
+// Helper: compute opponent boards in correct order
+// Python env: next = (idx+1)%N, prev = (idx-1+N)%N
+// ========================================
+function getOrderedOpponentBoards(ofc: OFCGameState, playerIdx: number) {
+    const N = ofc.players.length;
+    const nextIdx = (playerIdx + 1) % N;
+    const prevIdx = (playerIdx - 1 + N) % N;
+
+    if (N === 2) {
+        // 2人: nextだけ（prevは空）
+        return [ofc.players[nextIdx].board];
+    }
+    // 3人: [next, prev]
+    return [ofc.players[nextIdx].board, ofc.players[prevIdx].board];
+}
+
+// ========================================
+// Helper: compute player position relative to button
+// Python env: (player_idx - button_position) % N
+// ========================================
+function getPlayerPosition(playerIdx: number, buttonIdx: number, numPlayers: number): number {
+    return ((playerIdx - buttonIdx) % numPlayers + numPlayers) % numPlayers;
+}
+
+// ========================================
 // Helper: place for the player whose turn it is
 // ========================================
 async function placeForCurrentTurn(engine: OFCGameEngine, room: Room, ofc: OFCGameState): Promise<string | null> {
     const idx = ofc.currentTurnIndex;
-    if (idx < 0) return null; // no one to place
+    if (idx < 0) return null;
 
     const player = ofc.players[idx];
     if (player.hasPlaced) return null;
+
+    const numPlayers = ofc.players.length;
+    const buttonIdx = ofc.buttonIndex;
+    const opponentBoards = getOrderedOpponentBoards(ofc, idx);
+    const playerPosition = getPlayerPosition(idx, buttonIdx, numPlayers);
+    const discards = playerDiscards.get(player.socketId) || [];
 
     if (ofc.phase === 'OFC_INITIAL_PLACING') {
         if (player.isFantasyland) {
@@ -89,10 +136,7 @@ async function placeForCurrentTurn(engine: OFCGameEngine, room: Room, ofc: OFCGa
             return err ? `R1 FL ${player.name}: ${err.data.reason}` : null;
         } else {
             const cards = engine.getPlayerCards(room, player.socketId);
-            const opponentBoards = ofc.players
-                .filter(p => p.socketId !== player.socketId)
-                .map(p => p.board);
-            const placements = await botPlaceInitial(cards, opponentBoards);
+            const placements = await botPlaceInitial(cards, opponentBoards, playerPosition);
             const events = engine.placeInitialCards(room, player.socketId, placements);
             const err = events.find(e => e.type === 'error');
             return err ? `R1 ${player.name}: ${err.data.reason}` : null;
@@ -101,7 +145,6 @@ async function placeForCurrentTurn(engine: OFCGameEngine, room: Room, ofc: OFCGa
 
     if (ofc.phase === 'OFC_PINEAPPLE_PLACING') {
         if (player.isFantasyland) {
-            // FL players auto-skip in pineapple - engine handles this
             engine.placePineappleCards(room, player.socketId, [], '');
             return null;
         }
@@ -109,12 +152,17 @@ async function placeForCurrentTurn(engine: OFCGameEngine, room: Room, ofc: OFCGa
         const cards = engine.getPlayerCards(room, player.socketId);
         if (cards.length === 0) return null;
 
-        const opponentBoards = ofc.players
-            .filter(p => p.socketId !== player.socketId)
-            .map(p => p.board);
-        const { placements, discard } = await botPlacePineapple(cards, player.board, opponentBoards, ofc.round);
+        const { placements, discard } = await botPlacePineapple(
+            cards, player.board, opponentBoards, ofc.round, playerPosition, discards
+        );
         const events = engine.placePineappleCards(room, player.socketId, placements, discard);
         const err = events.find(e => e.type === 'error');
+
+        // Record discard for future rounds
+        if (!err && discard) {
+            recordDiscard(player.socketId, discard);
+        }
+
         return err ? `R${ofc.round} ${player.name}: ${err.data.reason}` : null;
     }
 
@@ -125,26 +173,28 @@ async function placeForCurrentTurn(engine: OFCGameEngine, room: Room, ofc: OFCGa
 // Statistics tracking
 // ========================================
 interface SimStats {
+    numPlayers: number;
     totalHands: number;
-    foulCount: [number, number];
-    flEntryCount: [number, number];
-    flContinueCount: [number, number];
-    flHands: [number, number];
-    totalPoints: [number, number];
-    totalRoyalties: [number, number];
+    foulCount: number[];
+    flEntryCount: number[];
+    flContinueCount: number[];
+    flHands: number[];
+    totalPoints: number[];
+    totalRoyalties: number[];
     handDistribution: Record<string, number>;
     errors: string[];
 }
 
-function initStats(): SimStats {
+function initStats(numPlayers: number): SimStats {
     return {
+        numPlayers,
         totalHands: 0,
-        foulCount: [0, 0],
-        flEntryCount: [0, 0],
-        flContinueCount: [0, 0],
-        flHands: [0, 0],
-        totalPoints: [0, 0],
-        totalRoyalties: [0, 0],
+        foulCount: new Array(numPlayers).fill(0),
+        flEntryCount: new Array(numPlayers).fill(0),
+        flContinueCount: new Array(numPlayers).fill(0),
+        flHands: new Array(numPlayers).fill(0),
+        totalPoints: new Array(numPlayers).fill(0),
+        totalRoyalties: new Array(numPlayers).fill(0),
         handDistribution: {},
         errors: [],
     };
@@ -153,16 +203,19 @@ function initStats(): SimStats {
 // ========================================
 // Main simulation loop
 // ========================================
-async function simulate(numHands: number): Promise<SimStats> {
+async function simulate(numHands: number, numPlayers: number): Promise<SimStats> {
     const engine = new OFCGameEngine();
-    const room = createTestRoom();
-    const stats = initStats();
+    const room = createTestRoom(numPlayers);
+    const stats = initStats(numPlayers);
 
     for (let hand = 0; hand < numHands; hand++) {
         try {
+            // Reset discards each hand
+            resetDiscards(numPlayers);
+
             // Track FL hands
             const flQueue = room.ofcState?.fantasylandQueue || [];
-            for (let pi = 0; pi < 2; pi++) {
+            for (let pi = 0; pi < numPlayers; pi++) {
                 const socketId = `bot-${pi + 1}`;
                 if (flQueue.includes(socketId)) {
                     stats.flHands[pi]++;
@@ -179,9 +232,9 @@ async function simulate(numHands: number): Promise<SimStats> {
 
             const ofc = room.ofcState!;
 
-            // Play until hand is done (max 100 iterations safety)
+            // Play until hand is done (max 200 iterations safety)
             let iterations = 0;
-            while (ofc.phase !== 'OFC_DONE' && iterations < 100) {
+            while (ofc.phase !== 'OFC_DONE' && iterations < 200) {
                 iterations++;
 
                 if (ofc.currentTurnIndex >= 0) {
@@ -191,7 +244,6 @@ async function simulate(numHands: number): Promise<SimStats> {
                         break;
                     }
                 } else if (ofc.phase === 'OFC_PINEAPPLE_PLACING') {
-                    // All players already placed (all FL?) — advance should happen automatically
                     break;
                 } else {
                     break;
@@ -204,7 +256,7 @@ async function simulate(numHands: number): Promise<SimStats> {
 
                 const roundScores = calculateOFCScores(ofc.players, ofc.bigBlind);
 
-                for (let pi = 0; pi < 2; pi++) {
+                for (let pi = 0; pi < numPlayers; pi++) {
                     const player = ofc.players[pi];
                     const score = roundScores[pi];
 
@@ -230,8 +282,10 @@ async function simulate(numHands: number): Promise<SimStats> {
 
                 // Progress log every 50 hands
                 if ((hand + 1) % 50 === 0) {
-                    const foulRate = ((stats.foulCount[0] + stats.foulCount[1]) / (stats.totalHands * 2) * 100).toFixed(1);
-                    console.log(`  [${hand + 1}/${numHands}] Foul: ${foulRate}%, FL entries: ${stats.flEntryCount[0] + stats.flEntryCount[1]}`);
+                    const totalFouls = stats.foulCount.reduce((a, b) => a + b, 0);
+                    const totalFL = stats.flEntryCount.reduce((a, b) => a + b, 0);
+                    const foulRate = (totalFouls / (stats.totalHands * numPlayers) * 100).toFixed(1);
+                    console.log(`  [${hand + 1}/${numHands}] Foul: ${foulRate}%, FL entries: ${totalFL}`);
                 }
             }
         } catch (e: any) {
@@ -250,15 +304,16 @@ async function simulate(numHands: number): Promise<SimStats> {
 // ========================================
 function report(stats: SimStats) {
     const n = stats.totalHands;
+    const np = stats.numPlayers;
     console.log('\n' + '='.repeat(60));
-    console.log('  OFC Bot Simulation Report');
+    console.log(`  OFC Bot Simulation Report (${np} players)`);
     console.log('='.repeat(60));
     console.log(`  Hands played: ${n}`);
     console.log('');
 
     console.log('--- Per-Player Stats ---');
-    for (let pi = 0; pi < 2; pi++) {
-        const name = pi === 0 ? 'Bot A' : 'Bot B';
+    for (let pi = 0; pi < np; pi++) {
+        const name = `Bot ${String.fromCharCode(65 + pi)}`;
         console.log(`\n  [${name}]`);
         console.log(`    Fouls:            ${stats.foulCount[pi]}/${n} (${(stats.foulCount[pi] / n * 100).toFixed(1)}%)`);
         console.log(`    FL Entries:        ${stats.flEntryCount[pi]} (${(stats.flEntryCount[pi] / n * 100).toFixed(1)}%)`);
@@ -269,22 +324,23 @@ function report(stats: SimStats) {
         console.log(`    Avg Points/Hand:   ${(stats.totalPoints[pi] / n).toFixed(2)}`);
     }
 
-    console.log('\n--- Hand Distribution (all rows, both players) ---');
+    console.log(`\n--- Hand Distribution (all rows, ${np} players) ---`);
     const sorted = Object.entries(stats.handDistribution)
         .sort((a, b) => b[1] - a[1]);
-    const totalRows = n * 2 * 3;
+    const totalRows = n * np * 3;
     for (const [name, count] of sorted) {
         console.log(`    ${name.padEnd(25)} ${count.toString().padStart(5)} (${(count / totalRows * 100).toFixed(1)}%)`);
     }
 
     // Sanity checks
     console.log('\n--- Sanity Checks ---');
-    const p1 = stats.totalPoints[0];
-    const p2 = stats.totalPoints[1];
-    const zeroSum = p1 + p2 === 0;
-    console.log(`    Zero-sum:       ${p1} + ${p2} = ${p1 + p2} → ${zeroSum ? 'PASS ✓' : 'FAIL ✗'}`);
-    console.log(`    Foul Rate:      ${((stats.foulCount[0] + stats.foulCount[1]) / (n * 2) * 100).toFixed(1)}%`);
-    console.log(`    FL Entry Rate:  ${((stats.flEntryCount[0] + stats.flEntryCount[1]) / (n * 2) * 100).toFixed(1)}%`);
+    const totalPts = stats.totalPoints.reduce((a, b) => a + b, 0);
+    const zeroSum = totalPts === 0;
+    console.log(`    Zero-sum:       ${stats.totalPoints.join(' + ')} = ${totalPts} → ${zeroSum ? 'PASS' : 'FAIL'}`);
+    const totalFouls = stats.foulCount.reduce((a, b) => a + b, 0);
+    const totalFL = stats.flEntryCount.reduce((a, b) => a + b, 0);
+    console.log(`    Foul Rate:      ${(totalFouls / (n * np) * 100).toFixed(1)}%`);
+    console.log(`    FL Entry Rate:  ${(totalFL / (n * np) * 100).toFixed(1)}%`);
 
     if (stats.errors.length > 0) {
         console.log(`\n--- Errors (${stats.errors.length}) ---`);
@@ -295,7 +351,7 @@ function report(stats: SimStats) {
             console.log(`    ... and ${stats.errors.length - 10} more`);
         }
     } else {
-        console.log('\n    No errors ✓');
+        console.log('\n    No errors');
     }
 
     console.log('='.repeat(60));
@@ -305,12 +361,11 @@ function report(stats: SimStats) {
 // Run
 // ========================================
 async function main() {
-    console.log(`Starting OFC simulation: ${NUM_HANDS} hands between 2 AI bots...`);
+    console.log(`Starting OFC simulation: ${NUM_HANDS} hands between ${NUM_PLAYERS} AI bots...`);
 
-    const stats = await simulate(NUM_HANDS);
+    const stats = await simulate(NUM_HANDS, NUM_PLAYERS);
     report(stats);
 
-    // Exit cleanly without waiting for ONNX cleanup
     const exitCode = stats.errors.length > 0 ? 1 : 0;
     console.log(`\nExiting with code ${exitCode}`);
     setTimeout(() => process.exit(exitCode), 100);

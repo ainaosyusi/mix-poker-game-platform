@@ -8,6 +8,7 @@ import * as ort from 'onnxruntime-node';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import type { OFCPlacement, OFCRow } from './types.js';
+import { checkFoul, parseCards, resolveJokersForFiveCards, resolveJokersForThreeCards, compareHandsJokerAware } from './OFCScoring.js';
 
 // ESM対応の__dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -17,8 +18,8 @@ const __dirname = path.dirname(__filename);
 // バージョン情報
 // ========================================
 
-export const OFC_BOT_VERSION = '1.3.0';
-export const OFC_MODEL_VERSION = 'Phase 9 FL Mastery (250M steps)';
+export const OFC_BOT_VERSION = '1.4.0';
+export const OFC_MODEL_VERSION = 'Phase 10 FL Stay (18M steps, logits)';
 
 // ========================================
 // 設定
@@ -79,22 +80,34 @@ const ACTION_DIM = 243;
 const NUM_CARDS = 54;  // 54枚デッキ（Joker 2枚含む）
 
 /**
+ * カード文字列からインデックスを返す（外部利用可）
+ */
+export { cardToIndex };
+
+/**
  * ゲーム状態から881次元の観測ベクトルを生成
+ * 学習環境 (ofc_3max_env.py) と完全一致させる
+ *
+ * @param cards - 手札カード文字列
+ * @param board - 自分のボード
+ * @param opponentBoards - 相手ボード [next(下家), prev(上家)] の順
  * @param round - OFCゲームのラウンド番号 (1=initial, 2-5=pineapple)
+ * @param playerPosition - ボタンからの相対位置 (0=BTN, 1=SB, 2=BB) default=0
+ * @param discards - 過去に捨てたカードのインデックス配列 default=[]
  */
 function buildObservation(
     cards: string[],
     board: OFCRow,
     opponentBoards: OFCRow[],
-    round: number
+    round: number,
+    playerPosition: number = 0,
+    discards: number[] = []
 ): Float32Array {
     const obs = new Float32Array(OBS_DIM);
     let offset = 0;
 
     // ★ アルファベット順でflatten（Python学習環境のsorted(obs.keys())と一致）
     // 1. game_state: 14
-    // Python (ofc_3max_env): current_street = 1 (initial), 2-5 (pineapple)
-    // = OFC engine round そのまま
     obs[offset++] = round;
     obs[offset++] = board.top.length;
     obs[offset++] = board.middle.length;
@@ -113,7 +126,7 @@ function buildObservation(
     } else {
         offset += 3;
     }
-    // FL情報（0固定）
+    // FL情報 (is_fl, fl_hand_count, next_in_fl, prev_in_fl)
     offset += 4;
     // offset = 14
 
@@ -129,7 +142,13 @@ function buildObservation(
     }
     offset += 3 * NUM_CARDS;  // offset = 176
 
-    // 3. my_discards: 54 (未使用、ゼロ)
+    // 3. my_discards: 54 (過去に捨てたカード)
+    const discardsOffset = offset;
+    for (const discardIdx of discards) {
+        if (discardIdx >= 0 && discardIdx < NUM_CARDS) {
+            obs[discardsOffset + discardIdx] = 1;
+        }
+    }
     offset += NUM_CARDS;  // offset = 230
 
     // 4. my_hand: 5 * 54 = 270
@@ -157,8 +176,9 @@ function buildObservation(
     }
     offset += 3 * NUM_CARDS;  // offset = 662
 
-    // 6. position_info: 3 (one-hot, ボタン位置)
-    obs[offset] = 1;  // ボタン
+    // 6. position_info: 3 (one-hot, ボタンからの相対位置)
+    const posIdx = Math.min(Math.max(playerPosition, 0), 2);
+    obs[offset + posIdx] = 1;
     offset += 3;  // offset = 665
 
     // 7. prev_opponent_board: 3 * 54 = 162
@@ -190,6 +210,10 @@ function buildObservation(
     for (const card of cards) {
         const idx = cardToIndex(card);
         if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
+    }
+    // 自分の捨て札
+    for (const discardIdx of discards) {
+        if (discardIdx >= 0 && discardIdx < NUM_CARDS) seen[discardIdx] = 1;
     }
     // 相手のボード
     for (const opp of opponentBoards) {
@@ -354,10 +378,13 @@ export function getOFCBotStatus(): {
     };
 }
 
-async function runInference(
+/**
+ * ONNX推論 — logitsを返す（マスク適用済み）
+ */
+async function runInferenceLogits(
     obs: Float32Array,
     mask: Float32Array
-): Promise<number> {
+): Promise<Float32Array> {
     if (!onnxSession) {
         throw new Error('ONNX session not initialized');
     }
@@ -370,8 +397,189 @@ async function runInference(
         action_mask: maskTensor,
     });
 
-    const actionData = results.action.data as BigInt64Array | Int32Array;
-    return Number(actionData[0]);
+    // logitsモデル: maskedされたlogitsを返す
+    const logitsOutput = results.logits;
+    if (logitsOutput) {
+        return new Float32Array(logitsOutput.data as Float32Array);
+    }
+
+    // フォールバック: 旧actionモデル対応
+    const actionOutput = results.action;
+    if (actionOutput) {
+        const actionData = actionOutput.data as BigInt64Array | Int32Array;
+        const logits = new Float32Array(ACTION_DIM).fill(-1e8);
+        logits[Number(actionData[0])] = 1;
+        return logits;
+    }
+
+    throw new Error('ONNX model returned unexpected output');
+}
+
+/**
+ * logitsからargmaxアクションを返す
+ */
+function argmaxAction(logits: Float32Array): number {
+    let bestAction = 0;
+    let bestLogit = -Infinity;
+    for (let i = 0; i < logits.length; i++) {
+        if (logits[i] > bestLogit) {
+            bestLogit = logits[i];
+            bestAction = i;
+        }
+    }
+    return bestAction;
+}
+
+/**
+ * logitsからアクションをスコア順にソートして返す
+ */
+function rankActionsByLogit(logits: Float32Array, mask: Float32Array): number[] {
+    const scored: { action: number; logit: number }[] = [];
+    for (let i = 0; i < ACTION_DIM; i++) {
+        if (mask[i] > 0) {
+            scored.push({ action: i, logit: logits[i] });
+        }
+    }
+    scored.sort((a, b) => b.logit - a.logit);
+    return scored.map(s => s.action);
+}
+
+// ========================================
+// ファウル防止レイヤー
+// ========================================
+
+/**
+ * ボードのコピーを作成
+ */
+function copyBoard(board: OFCRow): OFCRow {
+    return {
+        top: [...board.top],
+        middle: [...board.middle],
+        bottom: [...board.bottom],
+    };
+}
+
+/**
+ * テスト用にプレースメントを適用（ボードを直接変更）
+ */
+function applyTestPlacements(board: OFCRow, placements: OFCPlacement[]): void {
+    for (const p of placements) {
+        board[p.row].push(p.card);
+    }
+}
+
+/**
+ * 部分的なrow内の最大マッチ数（ペア=2, トリプス=3, クアッズ=4）
+ * Jokerを含む場合はJoker分を加算
+ */
+function getPartialMaxMatch(cards: string[]): number {
+    if (cards.length < 2) return cards.length;
+    const parsed = parseCards(cards);
+    const ranks = parsed.map(c => c.rank);
+    const jokerCount = ranks.filter(r => r === 'JOKER').length;
+    const nonJokerRanks = ranks.filter(r => r !== 'JOKER');
+    const counts: Record<string, number> = {};
+    for (const r of nonJokerRanks) counts[r] = (counts[r] || 0) + 1;
+    const maxNatural = Math.max(0, ...Object.values(counts));
+    return maxNatural + jokerCount;
+}
+
+/**
+ * 部分的なファウルチェック
+ * 完成したrow間の強さ順序を検証
+ * bottom >= middle >= top が守られていない場合 true を返す
+ * 近完成rowのヒューリスティックチェックも含む
+ */
+function checkPartialFoul(board: OFCRow): boolean {
+    // 全rowが完成 → 完全なファウルチェック
+    if (board.top.length === 3 && board.middle.length === 5 && board.bottom.length === 5) {
+        return checkFoul(board);
+    }
+
+    // middle(5枚) と bottom(5枚) の両方が完成
+    if (board.middle.length === 5 && board.bottom.length === 5) {
+        const cmp = compareHandsJokerAware(
+            parseCards(board.bottom),
+            parseCards(board.middle)
+        );
+        if (cmp < 0) return true; // bottom < middle = ファウル
+    }
+
+    // top(3枚) と middle(5枚) の両方が完成
+    if (board.top.length === 3 && board.middle.length === 5) {
+        const midHand = resolveJokersForFiveCards(parseCards(board.middle));
+        const topHand = resolveJokersForThreeCards(parseCards(board.top));
+        if (midHand.rank < topHand.rank) return true; // middle < top = ファウル
+        if (midHand.rank === topHand.rank) {
+            for (let i = 0; i < Math.min(midHand.highCards.length, topHand.highCards.length); i++) {
+                if (midHand.highCards[i] > topHand.highCards[i]) break;
+                if (midHand.highCards[i] < topHand.highCards[i]) return true;
+            }
+        }
+    }
+
+    // *** 近完成rowのヒューリスティック ***
+
+    // top完成(3枚)でペア以上 + middle4枚でペアなし → 残り1枚でペアが必要（~30%）
+    if (board.top.length === 3 && board.middle.length === 4) {
+        const topHand = resolveJokersForThreeCards(parseCards(board.top));
+        if (topHand.rank >= 1) { // topがペア以上
+            const midMax = getPartialMaxMatch(board.middle);
+            if (midMax < 2) return true; // middle4枚でペアなし → ファウルリスク高
+        }
+    }
+
+    // top完成(3枚)でトリプス + middle3-4枚でトリプスなし → 危険
+    if (board.top.length === 3 && board.middle.length >= 3) {
+        const topHand = resolveJokersForThreeCards(parseCards(board.top));
+        if (topHand.rank >= 3) { // topがトリプス
+            const midMax = getPartialMaxMatch(board.middle);
+            if (midMax < 3) return true; // middleでトリプス以上が必要
+        }
+    }
+
+    // middle完成(5枚) + bottom4枚でペアなし → middleがペア以上なら危険
+    if (board.middle.length === 5 && board.bottom.length === 4) {
+        const midHand = resolveJokersForFiveCards(parseCards(board.middle));
+        if (midHand.rank >= 1) {
+            const botMax = getPartialMaxMatch(board.bottom);
+            if (botMax < 2) return true; // bottom4枚でペアなし → ファウルリスク高
+        }
+    }
+
+    // middle4枚でトリプス以上 + bottom4枚でペアなし → 危険
+    if (board.middle.length === 4 && board.bottom.length === 4) {
+        const midMax = getPartialMaxMatch(board.middle);
+        const botMax = getPartialMaxMatch(board.bottom);
+        if (midMax >= 3 && botMax < 2) return true;
+    }
+
+    return false;
+}
+
+/**
+ * ファウル防止: logit順に代替アクションを試行
+ * @param rankedActions - logitスコア降順のアクションリスト
+ */
+function findNonFoulingAction(
+    rankedActions: number[],
+    cards: string[],
+    currentBoard: OFCRow,
+    phase: 'initial' | 'pineapple'
+): { action: number; rank: number } {
+    for (let rank = 0; rank < rankedActions.length; rank++) {
+        const action = rankedActions[rank];
+        const decoded = decodeAction(action, cards, phase);
+        const testBoard = copyBoard(currentBoard);
+        applyTestPlacements(testBoard, decoded.placements);
+
+        if (!checkPartialFoul(testBoard)) {
+            return { action, rank };
+        }
+    }
+
+    // 全アクションがファウルする場合、最高logitのアクションを使用
+    return { action: rankedActions[0], rank: 0 };
 }
 
 // ========================================
@@ -432,10 +640,13 @@ function heuristicPlacePineapple(
 
 /**
  * 初期5枚配置（AI推論 or ヒューリスティック）
+ * @param opponentBoards - [next(下家), prev(上家)] の順
+ * @param playerPosition - ボタンからの相対位置 (0=BTN, 1, 2)
  */
 export async function botPlaceInitial(
     cards: string[],
-    opponentBoards: OFCRow[] = []
+    opponentBoards: OFCRow[] = [],
+    playerPosition: number = 0
 ): Promise<OFCPlacement[]> {
     if (!USE_AI) {
         return heuristicPlaceInitial(cards);
@@ -454,9 +665,14 @@ export async function botPlaceInitial(
 
     try {
         const board: OFCRow = { top: [], middle: [], bottom: [] };
-        const obs = buildObservation(cards, board, opponentBoards, 1);  // round=1 (initial)
+        const obs = buildObservation(cards, board, opponentBoards, 1, playerPosition);
         const mask = buildActionMask(cards, board, 'initial');
-        const action = await runInference(obs, mask);
+        const logits = await runInferenceLogits(obs, mask);
+        const rankedActions = rankActionsByLogit(logits, mask);
+        const { action, rank } = findNonFoulingAction(rankedActions, cards, board, 'initial');
+        if (rank > 0) {
+            console.log(`[OFCBot] Foul prevention: rank #${rank} action ${action} (initial)`);
+        }
         const { placements } = decodeAction(action, cards, 'initial');
         return placements;
     } catch (e) {
@@ -467,13 +683,18 @@ export async function botPlaceInitial(
 
 /**
  * Pineappleラウンド（3枚→2枚配置+1枚捨て）
+ * @param opponentBoards - [next(下家), prev(上家)] の順
  * @param round - OFCゲームのラウンド番号 (2-5)
+ * @param playerPosition - ボタンからの相対位置 (0=BTN, 1, 2)
+ * @param discards - 過去に捨てたカードのインデックス配列
  */
 export async function botPlacePineapple(
     cards: string[],
     currentBoard: OFCRow,
     opponentBoards: OFCRow[] = [],
-    round: number = 2
+    round: number = 2,
+    playerPosition: number = 0,
+    discards: number[] = []
 ): Promise<{ placements: OFCPlacement[]; discard: string }> {
     if (!USE_AI) {
         return heuristicPlacePineapple(cards, currentBoard);
@@ -490,9 +711,14 @@ export async function botPlacePineapple(
     }
 
     try {
-        const obs = buildObservation(cards, currentBoard, opponentBoards, round);
+        const obs = buildObservation(cards, currentBoard, opponentBoards, round, playerPosition, discards);
         const mask = buildActionMask(cards, currentBoard, 'pineapple');
-        const action = await runInference(obs, mask);
+        const logits = await runInferenceLogits(obs, mask);
+        const rankedActions = rankActionsByLogit(logits, mask);
+        const { action, rank } = findNonFoulingAction(rankedActions, cards, currentBoard, 'pineapple');
+        if (rank > 0) {
+            console.log(`[OFCBot] Foul prevention: rank #${rank} action ${action} (round ${round})`);
+        }
         const { placements, discard } = decodeAction(action, cards, 'pineapple');
         return { placements, discard: discard || cards[cards.length - 1] };
     } catch (e) {

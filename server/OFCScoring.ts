@@ -65,7 +65,7 @@ function parseCard(cardStr: string): Card {
     return { rank: cardStr[0], suit: cardStr.slice(1) };
 }
 
-function parseCards(cardStrs: string[]): Card[] {
+export function parseCards(cardStrs: string[]): Card[] {
     return cardStrs.map(parseCard);
 }
 
@@ -172,7 +172,7 @@ export function compareThreeCardHands(hand1: ThreeCardHandRank, hand2: ThreeCard
  * 5枚ハンドのJokerを解決して最強のHandRankを返す
  * Jokerがない場合は通常のevaluateHandに委譲
  */
-function resolveJokersForFiveCards(cards: Card[]): HandRank {
+export function resolveJokersForFiveCards(cards: Card[]): HandRank {
     const jokerIndices: number[] = [];
     const regularCards: Card[] = [];
 
@@ -225,7 +225,7 @@ function resolveJokersForFiveCards(cards: Card[]): HandRank {
  * 3枚ハンドのJokerを解決して最強のThreeCardHandRankを返す
  * Jokerがない場合は通常のevaluateThreeCardHandに委譲
  */
-function resolveJokersForThreeCards(cards: Card[]): ThreeCardHandRank {
+export function resolveJokersForThreeCards(cards: Card[]): ThreeCardHandRank {
     const jokerIndices: number[] = [];
     const regularCards: Card[] = [];
 
@@ -277,7 +277,7 @@ function resolveJokersForThreeCards(cards: Card[]): ThreeCardHandRank {
 // Joker-Aware Comparison
 // ========================================
 
-function compareHandsJokerAware(cards1: Card[], cards2: Card[]): number {
+export function compareHandsJokerAware(cards1: Card[], cards2: Card[]): number {
     const hand1 = resolveJokersForFiveCards(cards1);
     const hand2 = resolveJokersForFiveCards(cards2);
     if (hand1.rank > hand2.rank) return 1;
