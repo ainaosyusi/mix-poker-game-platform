@@ -11,9 +11,11 @@ import {
     evaluateRazzHand,
     evaluateBadugiHand,
     evaluateDeuceSeven,
+    evaluateHidugiHand,
     compareLowHands,
     compareBadugiHands,
-    compareDeuceSeven
+    compareDeuceSeven,
+    compareHidugiHands
 } from './handEvaluator.js';
 import { PotManager } from './PotManager.js';
 import { getVariantConfig } from './gameVariants.js';
@@ -177,6 +179,42 @@ function getBestLowFiveCards(cards: Card[]): Card[] | null {
     return bestHand;
 }
 
+// Stud 2-7用: 7枚から最強の2-7ローハンド5枚を選ぶ
+function getBestDeuce7FiveCards(cards: Card[]): Card[] {
+    if (cards.length <= 5) return cards;
+
+    let bestHand = cards.slice(0, 5);
+    let bestResult = evaluateDeuceSeven(bestHand);
+
+    for (const hand of combinations(cards, 5)) {
+        const result = evaluateDeuceSeven(hand);
+        if (compareDeuceSeven(result, bestResult) > 0) {
+            bestHand = hand;
+            bestResult = result;
+        }
+    }
+
+    return bestHand;
+}
+
+// スプリットゲーム用: N枚からバドゥーギ最強の4枚を選ぶ
+function getBestBadugiFourCards(cards: Card[]): Card[] {
+    if (cards.length <= 4) return cards;
+
+    let bestHand = cards.slice(0, 4);
+    let bestResult = evaluateBadugiHand(bestHand);
+
+    for (const hand of combinations(cards, 4)) {
+        const result = evaluateBadugiHand(hand);
+        if (compareBadugiHands(result, bestResult) > 0) {
+            bestHand = hand;
+            bestResult = result;
+        }
+    }
+
+    return bestHand;
+}
+
 // Razz用: 7枚から最強のローハンド5枚を選ぶ
 function getBestRazzFiveCards(cards: Card[]): Card[] {
     if (cards.length <= 5) return cards;
@@ -318,11 +356,21 @@ export class ShowdownManager {
             case 'highlow':
                 return this.executeHiLoShowdown(room, showdownPlayers, board);
             case 'razz':
+            case 'a5':
                 return this.executeRazzShowdown(room, showdownPlayers, board);
             case 'badugi':
                 return this.executeBadugiShowdown(room, showdownPlayers);
+            case 'hidugi':
+                return this.executeHidugiShowdown(room, showdownPlayers);
             case '2-7':
                 return this.executeDeuce7Showdown(room, showdownPlayers);
+            case 'stud27':
+                return this.executeStud27Showdown(room, showdownPlayers);
+            case 'baduecey':
+            case 'badacey':
+            case 'archie':
+            case 'razzdugi':
+                return this.executeSplitShowdown(room, showdownPlayers, variantConfig.handEvaluation);
             default:
                 return this.executeHighShowdown(room, showdownPlayers, board);
         }
@@ -1040,6 +1088,268 @@ export class ShowdownManager {
 
         room.gameState.pot = { main: 0, side: [] };
         return winners;
+    }
+
+    /**
+     * Hidugi評価（高いバドゥーギが勝ち）
+     */
+    private executeHidugiShowdown(room: Room, players: Player[]): ShowdownResult {
+        const isAllInShowdown = this.hasAllInPlayer(room);
+        const orderedPlayers = this.getShowdownOrder(room, players);
+
+        const evaluations = orderedPlayers.map(player => {
+            const cards = parseCards(player.hand!);
+            const handResult = evaluateHidugiHand(cards);
+            return { player, handResult, handRank: handResult.name };
+        });
+
+        const winners = this.distributeWithHandResultComparison(
+            room,
+            evaluations,
+            (a, b) => compareHidugiHands(a.handResult, b.handResult)
+        );
+
+        const winnerIds = new Set(winners.map(w => w.playerId));
+
+        let allHands: ShowdownResult['allHands'];
+        if (isAllInShowdown) {
+            allHands = evaluations.map(e => ({
+                playerId: e.player.socketId,
+                playerName: e.player.name,
+                hand: [...e.player.hand!],
+                handRank: e.handRank,
+                isMucked: false
+            }));
+        } else {
+            allHands = this.determineShowMuckWithHandResult(
+                evaluations,
+                winnerIds,
+                (a, b) => compareHidugiHands(a.handResult, b.handResult)
+            );
+        }
+
+        console.log(`🏆 Hidugi Showdown: ${winners.map(w => `${w.playerName} wins ${w.amount} (${w.handRank})`).join(', ')}`);
+        return { winners, allHands };
+    }
+
+    /**
+     * Stud 2-7評価（7枚から最強の2-7ロー5枚を選ぶ）
+     */
+    private executeStud27Showdown(room: Room, players: Player[]): ShowdownResult {
+        const isAllInShowdown = this.hasAllInPlayer(room);
+        const orderedPlayers = this.getShowdownOrder(room, players);
+
+        const evaluations = orderedPlayers.map(player => {
+            const cards = parseCards(player.hand!);
+            const bestFive = getBestDeuce7FiveCards(cards);
+            const handResult = evaluateDeuceSeven(bestFive);
+            return { player, handResult, handRank: handResult.name };
+        });
+
+        const winners = this.distributeWithHandResultComparison(
+            room,
+            evaluations,
+            (a, b) => compareDeuceSeven(a.handResult, b.handResult)
+        );
+
+        const winnerIds = new Set(winners.map(w => w.playerId));
+
+        let allHands: ShowdownResult['allHands'];
+        if (isAllInShowdown) {
+            allHands = evaluations.map(e => ({
+                playerId: e.player.socketId,
+                playerName: e.player.name,
+                hand: [...e.player.hand!],
+                handRank: e.handRank,
+                isMucked: false
+            }));
+        } else {
+            allHands = this.determineShowMuckWithHandResult(
+                evaluations,
+                winnerIds,
+                (a, b) => compareDeuceSeven(a.handResult, b.handResult)
+            );
+        }
+
+        console.log(`🏆 Stud 2-7 Showdown: ${winners.map(w => `${w.playerName} wins ${w.amount} (${w.handRank})`).join(', ')}`);
+        return { winners, allHands };
+    }
+
+    /**
+     * スプリットポットショーダウン（Baduecey, Badacey, Archie, Razzdugi用）
+     * ポットを2つの評価方法で半分ずつ分ける
+     * - Baduecey: 2-7 Low + Badugi
+     * - Badacey: A-5 Low + Badugi
+     * - Archie: A-5 Low + 2-7 Low
+     * - Razzdugi: Razz(A-5 stud) + Badugi
+     */
+    private executeSplitShowdown(
+        room: Room,
+        players: Player[],
+        evalType: string
+    ): ShowdownResult {
+        const isAllInShowdown = this.hasAllInPlayer(room);
+        const orderedPlayers = this.getShowdownOrder(room, players);
+
+        // 各Side の評価・比較・名称を決定
+        type SideEval = { player: Player; handResult: any; handRank: string };
+
+        const buildSideEvaluations = (
+            side: 'A' | 'B'
+        ): { evals: SideEval[]; compare: (a: SideEval, b: SideEval) => number; name: string } => {
+            // Side A/B の評価タイプを決定
+            let sideType: 'a5' | '2-7' | 'badugi';
+            if (side === 'A') {
+                sideType = evalType === 'baduecey' ? '2-7' : 'a5'; // baduecey→2-7, badacey/archie/razzdugi→A-5
+            } else {
+                sideType = evalType === 'archie' ? '2-7' : 'badugi'; // archie→2-7, others→Badugi
+            }
+
+            const name = sideType === '2-7' ? '2-7' : sideType === 'a5' ? 'A-5' : 'Badugi';
+            const isStud = evalType === 'razzdugi';
+
+            const evals: SideEval[] = orderedPlayers.map(player => {
+                const cards = parseCards(player.hand!);
+
+                switch (sideType) {
+                    case '2-7': {
+                        const evalCards = isStud ? getBestDeuce7FiveCards(cards) : cards;
+                        const handResult = evaluateDeuceSeven(evalCards);
+                        return { player, handResult, handRank: handResult.name };
+                    }
+                    case 'a5': {
+                        const evalCards = isStud ? getBestRazzFiveCards(cards) : cards;
+                        const handResult = evaluateRazzHand(evalCards);
+                        return { player, handResult, handRank: handResult.name };
+                    }
+                    case 'badugi': {
+                        const evalCards = cards.length > 4 ? getBestBadugiFourCards(cards) : cards;
+                        const handResult = evaluateBadugiHand(evalCards);
+                        return { player, handResult, handRank: handResult.name };
+                    }
+                }
+            });
+
+            const compare = (a: SideEval, b: SideEval): number => {
+                switch (sideType) {
+                    case '2-7': return compareDeuceSeven(a.handResult, b.handResult);
+                    case 'a5': return compareLowHands(a.handResult, b.handResult);
+                    case 'badugi': return compareBadugiHands(a.handResult, b.handResult);
+                }
+            };
+
+            return { evals, compare, name };
+        };
+
+        const sideA = buildSideEvaluations('A');
+        const sideB = buildSideEvaluations('B');
+
+        // ポット分配
+        const winnersMap = new Map<string, { player: Player; amount: number; sideARank?: string; sideBRank?: string }>();
+
+        const addWinnings = (player: Player, amount: number, side: 'A' | 'B', handRank: string) => {
+            if (amount <= 0) return;
+            const existing = winnersMap.get(player.socketId);
+            if (existing) {
+                existing.amount += amount;
+                if (side === 'A') existing.sideARank = handRank;
+                if (side === 'B') existing.sideBRank = handRank;
+            } else {
+                winnersMap.set(player.socketId, {
+                    player,
+                    amount,
+                    sideARank: side === 'A' ? handRank : undefined,
+                    sideBRank: side === 'B' ? handRank : undefined
+                });
+            }
+        };
+
+        const allEligibleIds = orderedPlayers.map(p => p.socketId);
+        const potSlices = [
+            { amount: room.gameState.pot.main, eligiblePlayers: allEligibleIds },
+            ...room.gameState.pot.side.map(p => ({ amount: p.amount, eligiblePlayers: p.eligiblePlayers }))
+        ];
+
+        for (const pot of potSlices) {
+            if (pot.amount <= 0) continue;
+
+            const halfA = Math.floor(pot.amount / 2);
+            const halfB = pot.amount - halfA;
+
+            // Side A勝者
+            const eligibleA = sideA.evals.filter(e =>
+                pot.eligiblePlayers.includes(e.player.socketId)
+            );
+            if (eligibleA.length > 0) {
+                let bestA = eligibleA[0];
+                for (const e of eligibleA) {
+                    if (sideA.compare(e, bestA) > 0) bestA = e;
+                }
+                const winnersA = eligibleA.filter(e => sideA.compare(e, bestA) === 0);
+                const shareA = Math.floor(halfA / winnersA.length);
+                const remA = halfA % winnersA.length;
+                winnersA.forEach((w, i) => {
+                    const amount = shareA + (i < remA ? 1 : 0);
+                    w.player.stack += amount;
+                    addWinnings(w.player, amount, 'A', w.handRank);
+                });
+            }
+
+            // Side B勝者
+            const eligibleB = sideB.evals.filter(e =>
+                pot.eligiblePlayers.includes(e.player.socketId)
+            );
+            if (eligibleB.length > 0) {
+                let bestB = eligibleB[0];
+                for (const e of eligibleB) {
+                    if (sideB.compare(e, bestB) > 0) bestB = e;
+                }
+                const winnersB = eligibleB.filter(e => sideB.compare(e, bestB) === 0);
+                const shareB = Math.floor(halfB / winnersB.length);
+                const remB = halfB % winnersB.length;
+                winnersB.forEach((w, i) => {
+                    const amount = shareB + (i < remB ? 1 : 0);
+                    w.player.stack += amount;
+                    addWinnings(w.player, amount, 'B', w.handRank);
+                });
+            }
+        }
+
+        room.gameState.pot = { main: 0, side: [] };
+
+        const winners: ShowdownResult['winners'] = Array.from(winnersMap.values()).map(w => {
+            const rankParts: string[] = [];
+            if (w.sideARank) rankParts.push(`${sideA.name}: ${w.sideARank}`);
+            if (w.sideBRank) rankParts.push(`${sideB.name}: ${w.sideBRank}`);
+            return {
+                playerId: w.player.socketId,
+                playerName: w.player.name,
+                hand: [...w.player.hand!],
+                handRank: rankParts.join(' / '),
+                amount: w.amount
+            };
+        });
+
+        const winnerIds = new Set(winners.map(w => w.playerId));
+
+        const allHands = orderedPlayers.map(player => {
+            const isWinner = winnerIds.has(player.socketId);
+            const evalA = sideA.evals.find(e => e.player.socketId === player.socketId);
+            const evalB = sideB.evals.find(e => e.player.socketId === player.socketId);
+            const rankStr = (isWinner || isAllInShowdown)
+                ? `${sideA.name}: ${evalA?.handRank || '?'} / ${sideB.name}: ${evalB?.handRank || '?'}`
+                : 'Mucked';
+            return {
+                playerId: player.socketId,
+                playerName: player.name,
+                hand: (isWinner || isAllInShowdown) ? [...player.hand!] : null,
+                handRank: rankStr,
+                isMucked: !(isWinner || isAllInShowdown)
+            };
+        });
+
+        console.log(`🏆 Split Showdown (${sideA.name}/${sideB.name}): ${winners.map(w => `${w.playerName} wins ${w.amount} (${w.handRank})`).join(', ')}`);
+        return { winners, allHands };
     }
 
     /**

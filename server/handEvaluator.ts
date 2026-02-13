@@ -434,3 +434,82 @@ export const compareDeuceSeven = (hand1: DeuceSevenHandRank, hand2: DeuceSevenHa
 
     return 0;
 };
+
+// ========================================
+// A-5 LOWBALL EVALUATION - A-5ロー評価
+// ========================================
+
+/**
+ * A-5 Lowball評価（Razz評価と同一ロジック）
+ * ストレート・フラッシュはカウントしない、Aは常に1
+ */
+export const evaluateA5Hand = evaluateRazzHand;
+
+// ========================================
+// HIDUGI EVALUATION - ハイドゥーギ評価
+// ========================================
+
+/**
+ * ハイドゥーギ評価（高いバドゥーギ）
+ * バドゥーギと同じルールだが、高い方が勝ち
+ * 各スートで最も高いカードを選び、ランク重複を排除
+ */
+export const evaluateHidugiHand = (hand: Card[]): BadugiHandRank => {
+    if (hand.length !== 4) {
+        return { cardCount: 0, cards: [], name: 'Invalid' };
+    }
+
+    // 各スートで最も高いカードを選ぶ
+    const suitBest: Map<string, number> = new Map();
+
+    for (const card of hand) {
+        const val = rankValue(card.rank); // A=14（高い）
+        const current = suitBest.get(card.suit);
+        if (current === undefined || val > current) {
+            suitBest.set(card.suit, val);
+        }
+    }
+
+    // ランクの重複をチェックして除外（高いカードから優先）
+    const usedRanks = new Set<number>();
+    const validCards: number[] = [];
+
+    const sortedSuits = Array.from(suitBest.entries())
+        .sort((a, b) => b[1] - a[1]); // 降順（高い方優先）
+
+    for (const [, val] of sortedSuits) {
+        if (!usedRanks.has(val)) {
+            usedRanks.add(val);
+            validCards.push(val);
+        }
+    }
+
+    validCards.sort((a, b) => a - b);
+
+    const cardCount = validCards.length;
+    let name: string;
+    if (cardCount === 4) {
+        name = `Hidugi (${validCards.join('-')})`;
+    } else {
+        name = `${cardCount}-Card (${validCards.join('-')})`;
+    }
+
+    return { cardCount, cards: validCards, name };
+};
+
+/**
+ * 2つのハイドゥーギハンドを比較（高い方が勝ち）
+ */
+export const compareHidugiHands = (hand1: BadugiHandRank, hand2: BadugiHandRank): number => {
+    // カード数が多い方が勝ち
+    if (hand1.cardCount > hand2.cardCount) return 1;
+    if (hand1.cardCount < hand2.cardCount) return -1;
+
+    // 同じカード数なら、高いカードから比較（高い方が勝ち）
+    for (let i = hand1.cards.length - 1; i >= 0; i--) {
+        if (hand1.cards[i] > hand2.cards[i]) return 1;
+        if (hand1.cards[i] < hand2.cards[i]) return -1;
+    }
+
+    return 0;
+};

@@ -133,6 +133,95 @@ export const PRESET_ROOMS: PresetRoomConfig[] = [
         },
     },
 
+    // ========== Draw Mix ルーム ==========
+    {
+        id: 'mix-draw',
+        displayName: 'Draw Mix',
+        category: 'mix',
+        roomConfig: {
+            maxPlayers: 6,
+            smallBlind: 2,
+            bigBlind: 5,
+            buyInMin: 250,
+            buyInMax: 1000,
+            allowedGames: ['2-7_TD', 'FL_A5_TD', 'BADUGI', 'FL_HIDUGI', 'NL_27_SD_NA', 'NL_5HI_SD'],
+        },
+        rotationConfig: {
+            enabled: true,
+            gamesList: ['2-7_TD', 'FL_A5_TD', 'BADUGI', 'FL_HIDUGI', 'NL_27_SD_NA', 'NL_5HI_SD'],
+            handsPerGame: 8,
+        },
+    },
+    // ========== Stud Mix ルーム ==========
+    {
+        id: 'mix-stud',
+        displayName: 'Stud Mix',
+        category: 'mix',
+        roomConfig: {
+            maxPlayers: 6,
+            smallBlind: 2,
+            bigBlind: 5,
+            buyInMin: 250,
+            buyInMax: 1000,
+            allowedGames: ['7CS', '7CS8', 'RAZZ', 'FL_STUD_27'],
+        },
+        rotationConfig: {
+            enabled: true,
+            gamesList: ['7CS', '7CS8', 'RAZZ', 'FL_STUD_27'],
+            handsPerGame: 8,
+        },
+    },
+    // ========== Omaha Mix ルーム ==========
+    {
+        id: 'mix-omaha',
+        displayName: 'Omaha Mix',
+        category: 'mix',
+        roomConfig: {
+            maxPlayers: 6,
+            smallBlind: 2,
+            bigBlind: 5,
+            buyInMin: 250,
+            buyInMax: 1000,
+            allowedGames: ['PLO', 'PLO8', 'PLO5', 'BIG_O', 'FLO8'],
+        },
+        rotationConfig: {
+            enabled: true,
+            gamesList: ['PLO', 'PLO8', 'PLO5', 'BIG_O', 'FLO8'],
+            handsPerGame: 8,
+        },
+    },
+    // ========== 20-Game Mix ルーム ==========
+    {
+        id: 'mix-20game',
+        displayName: '20-Game Mix',
+        category: 'mix',
+        roomConfig: {
+            maxPlayers: 6,
+            smallBlind: 2,
+            bigBlind: 5,
+            buyInMin: 250,
+            buyInMax: 1000,
+            allowedGames: [
+                'NLH', 'PLO', 'PLO8', 'PLO5', 'BIG_O', 'FLO8',
+                '7CS', '7CS8', 'RAZZ', 'FL_STUD_27',
+                '2-7_TD', 'FL_A5_TD', 'BADUGI', 'FL_HIDUGI',
+                'NL_27_SD_NA', 'NL_5HI_SD', 'PL_BADUGI',
+                'FL_BADUECEY', 'FL_BADACEY', 'FL_ARCHIE',
+            ],
+        },
+        rotationConfig: {
+            enabled: true,
+            gamesList: [
+                'NLH', 'PLO', 'PLO8', 'PLO5', 'BIG_O', 'FLO8',
+                '7CS', '7CS8', 'RAZZ', 'FL_STUD_27',
+                '2-7_TD', 'FL_A5_TD', 'BADUGI', 'FL_HIDUGI',
+                'NL_27_SD_NA', 'NL_5HI_SD', 'PL_BADUGI',
+                'FL_BADUECEY', 'FL_BADACEY', 'FL_ARCHIE',
+            ],
+            handsPerGame: 8,
+        },
+    },
+
     // ========== OFC ルーム ==========
     {
         id: 'ofc-1-2',
