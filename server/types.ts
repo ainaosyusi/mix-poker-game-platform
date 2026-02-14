@@ -23,7 +23,8 @@ export type GameVariant =
     | 'PLO'
     | 'PLO8'
     // Flop Games (β版追加)
-    | 'BIG_O'              // 5-Card PLO
+    | 'PLO5'               // 5-Card PLO
+    | 'BIG_O'              // 5-Card PLO8
     | 'FLO8'               // Fixed-Limit Omaha Hi-Lo
     | 'PLO_OCEAN'          // PLO Ocean
     | 'PLO8_OCEAN'         // PLO8 Ocean

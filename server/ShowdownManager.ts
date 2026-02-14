@@ -938,6 +938,53 @@ export class ShowdownManager {
      * サイドポット対応のポット分配
      * 各ポットごとに参加資格のあるプレイヤーの中から勝者を決定
      */
+    /**
+     * 単一ポットの分配：資格者の中から最強ハンドを見つけ、同着分割して winnersMap に加算
+     */
+    private distributePot(
+        potAmount: number,
+        potLabel: string,
+        eligibleEvaluations: { player: Player; bestFive: Card[]; handRank: string }[],
+        compareFunc: (a: Card[], b: Card[]) => number,
+        winnersMap: Map<string, { player: Player; handRank: string; amount: number; bestFive: Card[] }>
+    ): void {
+        if (potAmount <= 0 || eligibleEvaluations.length === 0) return;
+
+        console.log(`💰 ${potLabel}: ${potAmount}, ${eligibleEvaluations.length} eligible players`);
+
+        let bestEval = eligibleEvaluations[0];
+        for (const e of eligibleEvaluations) {
+            if (compareFunc(e.bestFive, bestEval.bestFive) > 0) {
+                bestEval = e;
+            }
+        }
+
+        const winners = eligibleEvaluations.filter(e =>
+            compareFunc(e.bestFive, bestEval.bestFive) === 0
+        );
+        console.log(`🏆 ${potLabel} winners: ${winners.map(w => `${w.player.name} (${w.handRank})`).join(', ')}`);
+
+        const share = Math.floor(potAmount / winners.length);
+        const remainder = potAmount % winners.length;
+
+        winners.forEach((w, i) => {
+            const amount = share + (i < remainder ? 1 : 0);
+            w.player.stack += amount;
+
+            const existing = winnersMap.get(w.player.socketId);
+            if (existing) {
+                existing.amount += amount;
+            } else {
+                winnersMap.set(w.player.socketId, {
+                    player: w.player,
+                    handRank: w.handRank,
+                    amount,
+                    bestFive: w.bestFive
+                });
+            }
+        });
+    }
+
     private distributeToWinnersWithSidePots(
         room: Room,
         allEvaluations: { player: Player; bestFive: Card[]; handRank: string }[],
@@ -947,99 +994,15 @@ export class ShowdownManager {
         const winnersMap = new Map<string, { player: Player; handRank: string; amount: number; bestFive: Card[] }>();
         const boardCards = parseCards(board);
 
-        // 全参加者のソケットID（メインポット資格者）
-        const allPlayerIds = allEvaluations.map(e => e.player.socketId);
-
         // メインポットの分配
-        if (room.gameState.pot.main > 0) {
-            console.log(`💰 Main pot: ${room.gameState.pot.main}, ${allEvaluations.length} eligible players`);
-
-            // 全員の中から最強のハンドを見つける
-            let bestEval = allEvaluations[0];
-            for (const e of allEvaluations) {
-                if (compareFunc(e.bestFive, bestEval.bestFive) > 0) {
-                    bestEval = e;
-                }
-            }
-
-            // 同着勝者を見つける
-            const mainWinners = allEvaluations.filter(e =>
-                compareFunc(e.bestFive, bestEval.bestFive) === 0
-            );
-
-            console.log(`🏆 Main pot winners: ${mainWinners.map(w => `${w.player.name} (${w.handRank})`).join(', ')}`);
-
-            const share = Math.floor(room.gameState.pot.main / mainWinners.length);
-            const remainder = room.gameState.pot.main % mainWinners.length;
-
-            mainWinners.forEach((w, i) => {
-                const amount = share + (i < remainder ? 1 : 0);
-                w.player.stack += amount;
-                console.log(`  → ${w.player.name} wins +${amount} from main pot`);
-
-                winnersMap.set(w.player.socketId, {
-                    player: w.player,
-                    handRank: w.handRank,
-                    amount,
-                    bestFive: w.bestFive
-                });
-            });
-        }
+        this.distributePot(room.gameState.pot.main, 'Main pot', allEvaluations, compareFunc, winnersMap);
 
         // サイドポットの分配
         for (const sidePot of room.gameState.pot.side) {
-            if (sidePot.amount <= 0) continue;
-
-            console.log(`💰 Side pot: ${sidePot.amount}, eligible players: ${sidePot.eligiblePlayers.join(', ')}`);
-
-            // このサイドポットに参加資格のあるプレイヤーの評価のみ
-            const eligibleEvaluations = allEvaluations.filter(e =>
+            const eligible = allEvaluations.filter(e =>
                 sidePot.eligiblePlayers.includes(e.player.socketId)
             );
-
-            console.log(`  → ${eligibleEvaluations.length} eligible evaluations`);
-            eligibleEvaluations.forEach(e => {
-                console.log(`     ${e.player.name}: ${e.handRank}`);
-            });
-
-            if (eligibleEvaluations.length === 0) continue;
-
-            // 参加資格者の中から最強のハンドを見つける
-            let bestEval = eligibleEvaluations[0];
-            for (const e of eligibleEvaluations) {
-                if (compareFunc(e.bestFive, bestEval.bestFive) > 0) {
-                    bestEval = e;
-                }
-            }
-
-            // 同着勝者を見つける
-            const sideWinners = eligibleEvaluations.filter(e =>
-                compareFunc(e.bestFive, bestEval.bestFive) === 0
-            );
-
-            console.log(`🏆 Side pot winners: ${sideWinners.map(w => `${w.player.name} (${w.handRank})`).join(', ')}`);
-
-            const share = Math.floor(sidePot.amount / sideWinners.length);
-            const remainder = sidePot.amount % sideWinners.length;
-
-            sideWinners.forEach((w, i) => {
-                const amount = share + (i < remainder ? 1 : 0);
-                w.player.stack += amount;
-                console.log(`  → ${w.player.name} wins +${amount} from side pot`);
-
-                const existing = winnersMap.get(w.player.socketId);
-                if (existing) {
-                    existing.amount += amount;
-                    console.log(`     (total now: +${existing.amount})`);
-                } else {
-                    winnersMap.set(w.player.socketId, {
-                        player: w.player,
-                        handRank: w.handRank,
-                        amount,
-                        bestFive: w.bestFive
-                    });
-                }
-            });
+            this.distributePot(sidePot.amount, 'Side pot', eligible, compareFunc, winnersMap);
         }
 
         room.gameState.pot = { main: 0, side: [] };
@@ -1055,7 +1018,7 @@ export class ShowdownManager {
             return {
                 playerId: w.player.socketId,
                 playerName: w.player.name,
-                hand: [...w.player.hand!],  // 深いコピー
+                hand: [...w.player.hand!],
                 handRank: w.handRank,
                 amount: w.amount,
                 qualifyingHoleCards,
@@ -1178,10 +1141,6 @@ export class ShowdownManager {
     /**
      * スプリットポットショーダウン（Baduecey, Badacey, Archie, Razzdugi用）
      * ポットを2つの評価方法で半分ずつ分ける
-     * - Baduecey: 2-7 Low + Badugi
-     * - Badacey: A-5 Low + Badugi
-     * - Archie: A-5 Low + 2-7 Low
-     * - Razzdugi: Razz(A-5 stud) + Badugi
      */
     private executeSplitShowdown(
         room: Room,
@@ -1191,58 +1150,42 @@ export class ShowdownManager {
         const isAllInShowdown = this.hasAllInPlayer(room);
         const orderedPlayers = this.getShowdownOrder(room, players);
 
-        // 各Side の評価・比較・名称を決定
-        type SideEval = { player: Player; handResult: any; handRank: string };
-
-        const buildSideEvaluations = (
-            side: 'A' | 'B'
-        ): { evals: SideEval[]; compare: (a: SideEval, b: SideEval) => number; name: string } => {
-            // Side A/B の評価タイプを決定
-            let sideType: 'a5' | '2-7' | 'badugi';
-            if (side === 'A') {
-                sideType = evalType === 'baduecey' ? '2-7' : 'a5'; // baduecey→2-7, badacey/archie/razzdugi→A-5
-            } else {
-                sideType = evalType === 'archie' ? '2-7' : 'badugi'; // archie→2-7, others→Badugi
-            }
-
-            const name = sideType === '2-7' ? '2-7' : sideType === 'a5' ? 'A-5' : 'Badugi';
-            const isStud = evalType === 'razzdugi';
-
-            const evals: SideEval[] = orderedPlayers.map(player => {
-                const cards = parseCards(player.hand!);
-
-                switch (sideType) {
-                    case '2-7': {
-                        const evalCards = isStud ? getBestDeuce7FiveCards(cards) : cards;
-                        const handResult = evaluateDeuceSeven(evalCards);
-                        return { player, handResult, handRank: handResult.name };
-                    }
-                    case 'a5': {
-                        const evalCards = isStud ? getBestRazzFiveCards(cards) : cards;
-                        const handResult = evaluateRazzHand(evalCards);
-                        return { player, handResult, handRank: handResult.name };
-                    }
-                    case 'badugi': {
-                        const evalCards = cards.length > 4 ? getBestBadugiFourCards(cards) : cards;
-                        const handResult = evaluateBadugiHand(evalCards);
-                        return { player, handResult, handRank: handResult.name };
-                    }
-                }
-            });
-
-            const compare = (a: SideEval, b: SideEval): number => {
-                switch (sideType) {
-                    case '2-7': return compareDeuceSeven(a.handResult, b.handResult);
-                    case 'a5': return compareLowHands(a.handResult, b.handResult);
-                    case 'badugi': return compareBadugiHands(a.handResult, b.handResult);
-                }
-            };
-
-            return { evals, compare, name };
+        // スプリットゲームの評価タイプ設定テーブル
+        const SPLIT_CONFIG: Record<string, { sideA: 'a5' | '2-7'; sideB: '2-7' | 'badugi' }> = {
+            'baduecey': { sideA: '2-7', sideB: 'badugi' },
+            'badacey':  { sideA: 'a5',  sideB: 'badugi' },
+            'archie':   { sideA: 'a5',  sideB: '2-7' },
+            'razzdugi': { sideA: 'a5',  sideB: 'badugi' },
         };
 
-        const sideA = buildSideEvaluations('A');
-        const sideB = buildSideEvaluations('B');
+        // 評価タイプ別のevaluator/comparator/名称
+        type SideEval = { player: Player; handResult: any; handRank: string };
+        const SIDE_EVALUATORS: Record<string, {
+            name: string;
+            evaluate: (cards: Card[], isStud: boolean) => any;
+            compare: (a: any, b: any) => number;
+        }> = {
+            '2-7':   { name: '2-7',   evaluate: (c, s) => evaluateDeuceSeven(s ? getBestDeuce7FiveCards(c) : c), compare: compareDeuceSeven },
+            'a5':    { name: 'A-5',   evaluate: (c, s) => evaluateRazzHand(s ? getBestRazzFiveCards(c) : c),     compare: compareLowHands },
+            'badugi': { name: 'Badugi', evaluate: (c, _) => evaluateBadugiHand(c.length > 4 ? getBestBadugiFourCards(c) : c), compare: compareBadugiHands },
+        };
+
+        const config = SPLIT_CONFIG[evalType] || SPLIT_CONFIG['baduecey'];
+        const isStud = evalType === 'razzdugi';
+
+        const buildSideEvals = (sideType: string) => {
+            const ev = SIDE_EVALUATORS[sideType];
+            const evals: SideEval[] = orderedPlayers.map(player => {
+                const cards = parseCards(player.hand!);
+                const handResult = ev.evaluate(cards, isStud);
+                return { player, handResult, handRank: handResult.name };
+            });
+            const compare = (a: SideEval, b: SideEval) => ev.compare(a.handResult, b.handResult);
+            return { evals, compare, name: ev.name };
+        };
+
+        const sideA = buildSideEvals(config.sideA);
+        const sideB = buildSideEvals(config.sideB);
 
         // ポット分配
         const winnersMap = new Map<string, { player: Player; amount: number; sideARank?: string; sideBRank?: string }>();
@@ -1253,15 +1196,38 @@ export class ShowdownManager {
             if (existing) {
                 existing.amount += amount;
                 if (side === 'A') existing.sideARank = handRank;
-                if (side === 'B') existing.sideBRank = handRank;
+                else existing.sideBRank = handRank;
             } else {
                 winnersMap.set(player.socketId, {
-                    player,
-                    amount,
+                    player, amount,
                     sideARank: side === 'A' ? handRank : undefined,
                     sideBRank: side === 'B' ? handRank : undefined
                 });
             }
+        };
+
+        // Side勝者にポットを分配するヘルパー
+        const distributeSidePot = (
+            sideEvals: SideEval[],
+            compareFunc: (a: SideEval, b: SideEval) => number,
+            eligibleIds: string[],
+            potAmount: number,
+            side: 'A' | 'B'
+        ) => {
+            const eligible = sideEvals.filter(e => eligibleIds.includes(e.player.socketId));
+            if (eligible.length === 0) return;
+            let best = eligible[0];
+            for (const e of eligible) {
+                if (compareFunc(e, best) > 0) best = e;
+            }
+            const sideWinners = eligible.filter(e => compareFunc(e, best) === 0);
+            const share = Math.floor(potAmount / sideWinners.length);
+            const rem = potAmount % sideWinners.length;
+            sideWinners.forEach((w, i) => {
+                const amount = share + (i < rem ? 1 : 0);
+                w.player.stack += amount;
+                addWinnings(w.player, amount, side, w.handRank);
+            });
         };
 
         const allEligibleIds = orderedPlayers.map(p => p.socketId);
@@ -1272,47 +1238,10 @@ export class ShowdownManager {
 
         for (const pot of potSlices) {
             if (pot.amount <= 0) continue;
-
             const halfA = Math.floor(pot.amount / 2);
             const halfB = pot.amount - halfA;
-
-            // Side A勝者
-            const eligibleA = sideA.evals.filter(e =>
-                pot.eligiblePlayers.includes(e.player.socketId)
-            );
-            if (eligibleA.length > 0) {
-                let bestA = eligibleA[0];
-                for (const e of eligibleA) {
-                    if (sideA.compare(e, bestA) > 0) bestA = e;
-                }
-                const winnersA = eligibleA.filter(e => sideA.compare(e, bestA) === 0);
-                const shareA = Math.floor(halfA / winnersA.length);
-                const remA = halfA % winnersA.length;
-                winnersA.forEach((w, i) => {
-                    const amount = shareA + (i < remA ? 1 : 0);
-                    w.player.stack += amount;
-                    addWinnings(w.player, amount, 'A', w.handRank);
-                });
-            }
-
-            // Side B勝者
-            const eligibleB = sideB.evals.filter(e =>
-                pot.eligiblePlayers.includes(e.player.socketId)
-            );
-            if (eligibleB.length > 0) {
-                let bestB = eligibleB[0];
-                for (const e of eligibleB) {
-                    if (sideB.compare(e, bestB) > 0) bestB = e;
-                }
-                const winnersB = eligibleB.filter(e => sideB.compare(e, bestB) === 0);
-                const shareB = Math.floor(halfB / winnersB.length);
-                const remB = halfB % winnersB.length;
-                winnersB.forEach((w, i) => {
-                    const amount = shareB + (i < remB ? 1 : 0);
-                    w.player.stack += amount;
-                    addWinnings(w.player, amount, 'B', w.handRank);
-                });
-            }
+            distributeSidePot(sideA.evals, sideA.compare, pot.eligiblePlayers, halfA, 'A');
+            distributeSidePot(sideB.evals, sideB.compare, pot.eligiblePlayers, halfB, 'B');
         }
 
         room.gameState.pot = { main: 0, side: [] };

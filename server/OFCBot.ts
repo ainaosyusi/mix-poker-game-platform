@@ -99,6 +99,83 @@ export { cardToIndex };
  * @param discards - 過去に捨てたカードのインデックス配列 default=[]
  * @param opponentFL - 相手のFL状態 [next(下家), prev(上家)] default=[]
  */
+/** ボードの3row(top/mid/bot)をone-hotエンコード (3 * 54 = 162 dims) */
+function encodeBoard(obs: Float32Array, offset: number, board: OFCRow): void {
+    for (const [rowIdx, rowCards] of [board.top, board.middle, board.bottom].entries()) {
+        for (const card of rowCards) {
+            const idx = cardToIndex(card);
+            if (idx >= 0 && idx < NUM_CARDS) {
+                obs[offset + rowIdx * NUM_CARDS + idx] = 1;
+            }
+        }
+    }
+}
+
+/** ゲーム状態の14次元をエンコード */
+function encodeGameState(
+    obs: Float32Array, offset: number,
+    round: number, board: OFCRow, opponentBoards: OFCRow[], opponentFL: boolean[]
+): void {
+    obs[offset] = round;
+    obs[offset + 1] = board.top.length;
+    obs[offset + 2] = board.middle.length;
+    obs[offset + 3] = board.bottom.length;
+    for (let i = 0; i < 2; i++) {
+        if (opponentBoards.length > i) {
+            obs[offset + 4 + i * 3] = opponentBoards[i].top.length;
+            obs[offset + 5 + i * 3] = opponentBoards[i].middle.length;
+            obs[offset + 6 + i * 3] = opponentBoards[i].bottom.length;
+        }
+    }
+    // FL情報: bot自身はFL時にbotPlaceFantasylandを使うのでここでは0
+    obs[offset + 10] = 0;
+    obs[offset + 11] = 0;
+    obs[offset + 12] = (opponentFL.length > 0 && opponentFL[0]) ? 1 : 0;
+    obs[offset + 13] = (opponentFL.length > 1 && opponentFL[1]) ? 1 : 0;
+}
+
+/** 見えているカードからunseen確率分布を計算 (54 dims) */
+function encodeUnseenProbability(
+    obs: Float32Array, offset: number,
+    board: OFCRow, cards: string[], discards: number[], opponentBoards: OFCRow[]
+): void {
+    const seen = new Uint8Array(NUM_CARDS);
+    // 自分のボード + ハンド
+    for (const rowCards of [board.top, board.middle, board.bottom]) {
+        for (const card of rowCards) {
+            const idx = cardToIndex(card);
+            if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
+        }
+    }
+    for (const card of cards) {
+        const idx = cardToIndex(card);
+        if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
+    }
+    // 捨て札
+    for (const discardIdx of discards) {
+        if (discardIdx >= 0 && discardIdx < NUM_CARDS) seen[discardIdx] = 1;
+    }
+    // 相手のボード（FL中でもデッキから配られているのでseen扱い）
+    for (const opp of opponentBoards) {
+        for (const rowCards of [opp.top, opp.middle, opp.bottom]) {
+            for (const card of rowCards) {
+                const idx = cardToIndex(card);
+                if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
+            }
+        }
+    }
+    let unseenCount = 0;
+    for (let i = 0; i < NUM_CARDS; i++) {
+        if (!seen[i]) unseenCount++;
+    }
+    if (unseenCount > 0) {
+        const prob = 1.0 / unseenCount;
+        for (let i = 0; i < NUM_CARDS; i++) {
+            obs[offset + i] = seen[i] ? 0 : prob;
+        }
+    }
+}
+
 function buildObservation(
     cards: string[],
     board: OFCRow,
@@ -109,147 +186,40 @@ function buildObservation(
     opponentFL: boolean[] = []
 ): Float32Array {
     const obs = new Float32Array(OBS_DIM);
-    let offset = 0;
-
     // ★ アルファベット順でflatten（Python学習環境のsorted(obs.keys())と一致）
+
     // 1. game_state: 14
-    obs[offset++] = round;
-    obs[offset++] = board.top.length;
-    obs[offset++] = board.middle.length;
-    obs[offset++] = board.bottom.length;
-    if (opponentBoards.length > 0) {
-        obs[offset++] = opponentBoards[0].top.length;
-        obs[offset++] = opponentBoards[0].middle.length;
-        obs[offset++] = opponentBoards[0].bottom.length;
-    } else {
-        offset += 3;
-    }
-    if (opponentBoards.length > 1) {
-        obs[offset++] = opponentBoards[1].top.length;
-        obs[offset++] = opponentBoards[1].middle.length;
-        obs[offset++] = opponentBoards[1].bottom.length;
-    } else {
-        offset += 3;
-    }
-    // FL情報 (is_fl, fl_hand_count, next_in_fl, prev_in_fl)
-    // 学習環境と一致: bot自身はFL時にbotPlaceFantasylandを使うのでここでは0
-    obs[offset++] = 0;  // is_fl
-    obs[offset++] = 0;  // fl_hand_count
-    obs[offset++] = (opponentFL.length > 0 && opponentFL[0]) ? 1 : 0;  // next_in_fl
-    obs[offset++] = (opponentFL.length > 1 && opponentFL[1]) ? 1 : 0;  // prev_in_fl
-    // offset = 14
+    encodeGameState(obs, 0, round, board, opponentBoards, opponentFL);
 
-    // 2. my_board: 3 * 54 = 162
-    const myBoardOffset = offset;
-    for (const [rowIdx, rowCards] of [board.top, board.middle, board.bottom].entries()) {
-        for (const card of rowCards) {
-            const idx = cardToIndex(card);
-            if (idx >= 0 && idx < NUM_CARDS) {
-                obs[myBoardOffset + rowIdx * NUM_CARDS + idx] = 1;
-            }
-        }
-    }
-    offset += 3 * NUM_CARDS;  // offset = 176
+    // 2. my_board: 162 (offset 14)
+    encodeBoard(obs, 14, board);
 
-    // 3. my_discards: 54 (過去に捨てたカード)
-    const discardsOffset = offset;
+    // 3. my_discards: 54 (offset 176)
     for (const discardIdx of discards) {
-        if (discardIdx >= 0 && discardIdx < NUM_CARDS) {
-            obs[discardsOffset + discardIdx] = 1;
-        }
+        if (discardIdx >= 0 && discardIdx < NUM_CARDS) obs[176 + discardIdx] = 1;
     }
-    offset += NUM_CARDS;  // offset = 230
 
-    // 4. my_hand: 5 * 54 = 270
-    const myHandOffset = offset;
+    // 4. my_hand: 270 (offset 230) — 各カードを位置別にone-hot
     for (let i = 0; i < Math.min(5, cards.length); i++) {
         const idx = cardToIndex(cards[i]);
-        if (idx >= 0 && idx < NUM_CARDS) {
-            obs[myHandOffset + i * NUM_CARDS + idx] = 1;
-        }
-    }
-    offset += 5 * NUM_CARDS;  // offset = 500
-
-    // 5. next_opponent_board: 3 * 54 = 162
-    // 学習環境と一致: FL中の相手のボードはショーダウンまで隠蔽（ゼロ）
-    const nextOppOffset = offset;
-    const nextIsFL = opponentFL.length > 0 && opponentFL[0];
-    if (opponentBoards.length > 0 && !nextIsFL) {
-        const opp = opponentBoards[0];
-        for (const [rowIdx, rowCards] of [opp.top, opp.middle, opp.bottom].entries()) {
-            for (const card of rowCards) {
-                const idx = cardToIndex(card);
-                if (idx >= 0 && idx < NUM_CARDS) {
-                    obs[nextOppOffset + rowIdx * NUM_CARDS + idx] = 1;
-                }
-            }
-        }
-    }
-    offset += 3 * NUM_CARDS;  // offset = 662
-
-    // 6. position_info: 3 (one-hot, ボタンからの相対位置)
-    const posIdx = Math.min(Math.max(playerPosition, 0), 2);
-    obs[offset + posIdx] = 1;
-    offset += 3;  // offset = 665
-
-    // 7. prev_opponent_board: 3 * 54 = 162
-    // 学習環境と一致: FL中の相手のボードはショーダウンまで隠蔽（ゼロ）
-    const prevOppOffset = offset;
-    const prevIsFL = opponentFL.length > 1 && opponentFL[1];
-    if (opponentBoards.length > 1 && !prevIsFL) {
-        const opp = opponentBoards[1];
-        for (const [rowIdx, rowCards] of [opp.top, opp.middle, opp.bottom].entries()) {
-            for (const card of rowCards) {
-                const idx = cardToIndex(card);
-                if (idx >= 0 && idx < NUM_CARDS) {
-                    obs[prevOppOffset + rowIdx * NUM_CARDS + idx] = 1;
-                }
-            }
-        }
-    }
-    offset += 3 * NUM_CARDS;  // offset = 827
-
-    // 8. unseen_probability: 54 (見えていないカードの確率分布)
-    const seen = new Uint8Array(NUM_CARDS);
-
-    // 自分のボード
-    for (const rowCards of [board.top, board.middle, board.bottom]) {
-        for (const card of rowCards) {
-            const idx = cardToIndex(card);
-            if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
-        }
-    }
-    // 自分のハンド
-    for (const card of cards) {
-        const idx = cardToIndex(card);
-        if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
-    }
-    // 自分の捨て札
-    for (const discardIdx of discards) {
-        if (discardIdx >= 0 && discardIdx < NUM_CARDS) seen[discardIdx] = 1;
-    }
-    // 相手のボード（学習環境と一致: FL中でもカードはデッキから配られているのでseen扱い）
-    for (const opp of opponentBoards) {
-        for (const rowCards of [opp.top, opp.middle, opp.bottom]) {
-            for (const card of rowCards) {
-                const idx = cardToIndex(card);
-                if (idx >= 0 && idx < NUM_CARDS) seen[idx] = 1;
-            }
-        }
+        if (idx >= 0 && idx < NUM_CARDS) obs[230 + i * NUM_CARDS + idx] = 1;
     }
 
-    let unseenCount = 0;
-    for (let i = 0; i < NUM_CARDS; i++) {
-        if (!seen[i]) unseenCount++;
+    // 5. next_opponent_board: 162 (offset 500) — FL中は隠蔽
+    if (opponentBoards.length > 0 && !(opponentFL.length > 0 && opponentFL[0])) {
+        encodeBoard(obs, 500, opponentBoards[0]);
     }
-    const unseenOffset = offset;
-    if (unseenCount > 0) {
-        const prob = 1.0 / unseenCount;
-        for (let i = 0; i < NUM_CARDS; i++) {
-            obs[unseenOffset + i] = seen[i] ? 0 : prob;
-        }
+
+    // 6. position_info: 3 (offset 662) — one-hot
+    obs[662 + Math.min(Math.max(playerPosition, 0), 2)] = 1;
+
+    // 7. prev_opponent_board: 162 (offset 665) — FL中は隠蔽
+    if (opponentBoards.length > 1 && !(opponentFL.length > 1 && opponentFL[1])) {
+        encodeBoard(obs, 665, opponentBoards[1]);
     }
-    offset += NUM_CARDS;  // offset = 881
+
+    // 8. unseen_probability: 54 (offset 827)
+    encodeUnseenProbability(obs, 827, board, cards, discards, opponentBoards);
 
     return obs;
 }
@@ -499,9 +469,8 @@ function getPartialMaxMatch(cards: string[]): number {
 
 /**
  * 部分的なファウルチェック
- * 完成したrow間の強さ順序を検証
+ * 完成したrow間の強さ順序を検証 + 近完成rowのヒューリスティック
  * bottom >= middle >= top が守られていない場合 true を返す
- * 近完成rowのヒューリスティックチェックも含む
  */
 function checkPartialFoul(board: OFCRow): boolean {
     // 全rowが完成 → 完全なファウルチェック
@@ -509,12 +478,18 @@ function checkPartialFoul(board: OFCRow): boolean {
         return checkFoul(board);
     }
 
+    // 完成row間の確定チェック
+    if (checkCompletedRowFoul(board)) return true;
+
+    // 近完成rowのヒューリスティックチェック
+    return checkHeuristicFoul(board);
+}
+
+/** 完成したrow間の強さ順序を検証 */
+function checkCompletedRowFoul(board: OFCRow): boolean {
     // middle(5枚) と bottom(5枚) の両方が完成
     if (board.middle.length === 5 && board.bottom.length === 5) {
-        const cmp = compareHandsJokerAware(
-            parseCards(board.bottom),
-            parseCards(board.middle)
-        );
+        const cmp = compareHandsJokerAware(parseCards(board.bottom), parseCards(board.middle));
         if (cmp < 0) return true; // bottom < middle = ファウル
     }
 
@@ -522,7 +497,7 @@ function checkPartialFoul(board: OFCRow): boolean {
     if (board.top.length === 3 && board.middle.length === 5) {
         const midHand = resolveJokersForFiveCards(parseCards(board.middle));
         const topHand = resolveJokersForThreeCards(parseCards(board.top));
-        if (midHand.rank < topHand.rank) return true; // middle < top = ファウル
+        if (midHand.rank < topHand.rank) return true;
         if (midHand.rank === topHand.rank) {
             for (let i = 0; i < Math.min(midHand.highCards.length, topHand.highCards.length); i++) {
                 if (midHand.highCards[i] > topHand.highCards[i]) break;
@@ -531,40 +506,54 @@ function checkPartialFoul(board: OFCRow): boolean {
         }
     }
 
-    // *** 近完成rowのヒューリスティック ***
+    return false;
+}
 
-    // top完成(3枚)でペア以上 + middle4枚でペアなし → 残り1枚でペアが必要（~30%）
-    if (board.top.length === 3 && board.middle.length === 4) {
-        const topHand = resolveJokersForThreeCards(parseCards(board.top));
-        if (topHand.rank >= 1) { // topがペア以上
-            const midMax = getPartialMaxMatch(board.middle);
-            if (midMax < 2) return true; // middle4枚でペアなし → ファウルリスク高
+/** 近完成rowのヒューリスティックファウルチェック（ルールテーブル方式） */
+function checkHeuristicFoul(board: OFCRow): boolean {
+    // [条件, 上位rowの最低必要マッチ数, 下位rowのマッチ数取得元]
+    type FoulRule = {
+        condition: () => boolean;
+        upperMinRank: () => number; // 上位rowが必要とする最低ランク/マッチ数
+        lowerMaxMatch: () => number; // 下位rowの現在の最大マッチ数
+        minRequired: number; // lowerMaxMatchがこれ未満ならファウルリスク
+    };
+
+    const rules: FoulRule[] = [
+        // top完成(3枚)でペア以上 + middle4枚でペアなし → ファウルリスク高
+        {
+            condition: () => board.top.length === 3 && board.middle.length === 4,
+            upperMinRank: () => resolveJokersForThreeCards(parseCards(board.top)).rank,
+            lowerMaxMatch: () => getPartialMaxMatch(board.middle),
+            minRequired: 2,
+        },
+        // top完成(3枚)でトリプス + middle3-4枚でトリプスなし → 危険
+        {
+            condition: () => board.top.length === 3 && board.middle.length >= 3,
+            upperMinRank: () => resolveJokersForThreeCards(parseCards(board.top)).rank >= 3 ? 3 : 0,
+            lowerMaxMatch: () => getPartialMaxMatch(board.middle),
+            minRequired: 3,
+        },
+        // middle完成(5枚) + bottom4枚でペアなし → middleがペア以上なら危険
+        {
+            condition: () => board.middle.length === 5 && board.bottom.length === 4,
+            upperMinRank: () => resolveJokersForFiveCards(parseCards(board.middle)).rank,
+            lowerMaxMatch: () => getPartialMaxMatch(board.bottom),
+            minRequired: 2,
+        },
+        // middle4枚でトリプス以上 + bottom4枚でペアなし → 危険
+        {
+            condition: () => board.middle.length === 4 && board.bottom.length === 4,
+            upperMinRank: () => getPartialMaxMatch(board.middle) >= 3 ? 1 : 0,
+            lowerMaxMatch: () => getPartialMaxMatch(board.bottom),
+            minRequired: 2,
+        },
+    ];
+
+    for (const rule of rules) {
+        if (rule.condition() && rule.upperMinRank() >= 1 && rule.lowerMaxMatch() < rule.minRequired) {
+            return true;
         }
-    }
-
-    // top完成(3枚)でトリプス + middle3-4枚でトリプスなし → 危険
-    if (board.top.length === 3 && board.middle.length >= 3) {
-        const topHand = resolveJokersForThreeCards(parseCards(board.top));
-        if (topHand.rank >= 3) { // topがトリプス
-            const midMax = getPartialMaxMatch(board.middle);
-            if (midMax < 3) return true; // middleでトリプス以上が必要
-        }
-    }
-
-    // middle完成(5枚) + bottom4枚でペアなし → middleがペア以上なら危険
-    if (board.middle.length === 5 && board.bottom.length === 4) {
-        const midHand = resolveJokersForFiveCards(parseCards(board.middle));
-        if (midHand.rank >= 1) {
-            const botMax = getPartialMaxMatch(board.bottom);
-            if (botMax < 2) return true; // bottom4枚でペアなし → ファウルリスク高
-        }
-    }
-
-    // middle4枚でトリプス以上 + bottom4枚でペアなし → 危険
-    if (board.middle.length === 4 && board.bottom.length === 4) {
-        const midMax = getPartialMaxMatch(board.middle);
-        const botMax = getPartialMaxMatch(board.bottom);
-        if (midMax >= 3 && botMax < 2) return true;
     }
 
     return false;
