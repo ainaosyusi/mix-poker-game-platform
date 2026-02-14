@@ -18,8 +18,11 @@ const __dirname = path.dirname(__filename);
 // バージョン情報
 // ========================================
 
-export const OFC_BOT_VERSION = '1.4.0';
+export const OFC_BOT_VERSION = '1.5.0';
 export const OFC_MODEL_VERSION = 'Phase 10 FL Stay (18M steps, logits)';
+
+// ファウル防止: 探索するアクション数の上限（深くなりすぎるとモデルの選好から離れすぎる）
+const MAX_FOUL_PREVENTION_DEPTH = 10;
 
 // ========================================
 // 設定
@@ -94,6 +97,7 @@ export { cardToIndex };
  * @param round - OFCゲームのラウンド番号 (1=initial, 2-5=pineapple)
  * @param playerPosition - ボタンからの相対位置 (0=BTN, 1=SB, 2=BB) default=0
  * @param discards - 過去に捨てたカードのインデックス配列 default=[]
+ * @param opponentFL - 相手のFL状態 [next(下家), prev(上家)] default=[]
  */
 function buildObservation(
     cards: string[],
@@ -101,7 +105,8 @@ function buildObservation(
     opponentBoards: OFCRow[],
     round: number,
     playerPosition: number = 0,
-    discards: number[] = []
+    discards: number[] = [],
+    opponentFL: boolean[] = []
 ): Float32Array {
     const obs = new Float32Array(OBS_DIM);
     let offset = 0;
@@ -127,7 +132,11 @@ function buildObservation(
         offset += 3;
     }
     // FL情報 (is_fl, fl_hand_count, next_in_fl, prev_in_fl)
-    offset += 4;
+    // 学習環境と一致: bot自身はFL時にbotPlaceFantasylandを使うのでここでは0
+    obs[offset++] = 0;  // is_fl
+    obs[offset++] = 0;  // fl_hand_count
+    obs[offset++] = (opponentFL.length > 0 && opponentFL[0]) ? 1 : 0;  // next_in_fl
+    obs[offset++] = (opponentFL.length > 1 && opponentFL[1]) ? 1 : 0;  // prev_in_fl
     // offset = 14
 
     // 2. my_board: 3 * 54 = 162
@@ -162,8 +171,10 @@ function buildObservation(
     offset += 5 * NUM_CARDS;  // offset = 500
 
     // 5. next_opponent_board: 3 * 54 = 162
+    // 学習環境と一致: FL中の相手のボードはショーダウンまで隠蔽（ゼロ）
     const nextOppOffset = offset;
-    if (opponentBoards.length > 0) {
+    const nextIsFL = opponentFL.length > 0 && opponentFL[0];
+    if (opponentBoards.length > 0 && !nextIsFL) {
         const opp = opponentBoards[0];
         for (const [rowIdx, rowCards] of [opp.top, opp.middle, opp.bottom].entries()) {
             for (const card of rowCards) {
@@ -182,8 +193,10 @@ function buildObservation(
     offset += 3;  // offset = 665
 
     // 7. prev_opponent_board: 3 * 54 = 162
+    // 学習環境と一致: FL中の相手のボードはショーダウンまで隠蔽（ゼロ）
     const prevOppOffset = offset;
-    if (opponentBoards.length > 1) {
+    const prevIsFL = opponentFL.length > 1 && opponentFL[1];
+    if (opponentBoards.length > 1 && !prevIsFL) {
         const opp = opponentBoards[1];
         for (const [rowIdx, rowCards] of [opp.top, opp.middle, opp.bottom].entries()) {
             for (const card of rowCards) {
@@ -215,7 +228,7 @@ function buildObservation(
     for (const discardIdx of discards) {
         if (discardIdx >= 0 && discardIdx < NUM_CARDS) seen[discardIdx] = 1;
     }
-    // 相手のボード
+    // 相手のボード（学習環境と一致: FL中でもカードはデッキから配られているのでseen扱い）
     for (const opp of opponentBoards) {
         for (const rowCards of [opp.top, opp.middle, opp.bottom]) {
             for (const card of rowCards) {
@@ -567,7 +580,10 @@ function findNonFoulingAction(
     currentBoard: OFCRow,
     phase: 'initial' | 'pineapple'
 ): { action: number; rank: number } {
-    for (let rank = 0; rank < rankedActions.length; rank++) {
+    // モデルの上位N個のアクションのみ探索
+    // 深く探索しすぎるとモデルの選好から離れすぎて逆効果
+    const searchDepth = Math.min(rankedActions.length, MAX_FOUL_PREVENTION_DEPTH);
+    for (let rank = 0; rank < searchDepth; rank++) {
         const action = rankedActions[rank];
         const decoded = decodeAction(action, cards, phase);
         const testBoard = copyBoard(currentBoard);
@@ -578,7 +594,7 @@ function findNonFoulingAction(
         }
     }
 
-    // 全アクションがファウルする場合、最高logitのアクションを使用
+    // 上位N個全てがファウルする場合、最高logitのアクションを使用（モデルの判断を尊重）
     return { action: rankedActions[0], rank: 0 };
 }
 
@@ -642,11 +658,13 @@ function heuristicPlacePineapple(
  * 初期5枚配置（AI推論 or ヒューリスティック）
  * @param opponentBoards - [next(下家), prev(上家)] の順
  * @param playerPosition - ボタンからの相対位置 (0=BTN, 1, 2)
+ * @param opponentFL - 相手のFL状態 [next, prev]
  */
 export async function botPlaceInitial(
     cards: string[],
     opponentBoards: OFCRow[] = [],
-    playerPosition: number = 0
+    playerPosition: number = 0,
+    opponentFL: boolean[] = []
 ): Promise<OFCPlacement[]> {
     if (!USE_AI) {
         return heuristicPlaceInitial(cards);
@@ -665,7 +683,7 @@ export async function botPlaceInitial(
 
     try {
         const board: OFCRow = { top: [], middle: [], bottom: [] };
-        const obs = buildObservation(cards, board, opponentBoards, 1, playerPosition);
+        const obs = buildObservation(cards, board, opponentBoards, 1, playerPosition, [], opponentFL);
         const mask = buildActionMask(cards, board, 'initial');
         const logits = await runInferenceLogits(obs, mask);
         const rankedActions = rankActionsByLogit(logits, mask);
@@ -687,6 +705,7 @@ export async function botPlaceInitial(
  * @param round - OFCゲームのラウンド番号 (2-5)
  * @param playerPosition - ボタンからの相対位置 (0=BTN, 1, 2)
  * @param discards - 過去に捨てたカードのインデックス配列
+ * @param opponentFL - 相手のFL状態 [next, prev]
  */
 export async function botPlacePineapple(
     cards: string[],
@@ -694,7 +713,8 @@ export async function botPlacePineapple(
     opponentBoards: OFCRow[] = [],
     round: number = 2,
     playerPosition: number = 0,
-    discards: number[] = []
+    discards: number[] = [],
+    opponentFL: boolean[] = []
 ): Promise<{ placements: OFCPlacement[]; discard: string }> {
     if (!USE_AI) {
         return heuristicPlacePineapple(cards, currentBoard);
@@ -711,7 +731,7 @@ export async function botPlacePineapple(
     }
 
     try {
-        const obs = buildObservation(cards, currentBoard, opponentBoards, round, playerPosition, discards);
+        const obs = buildObservation(cards, currentBoard, opponentBoards, round, playerPosition, discards, opponentFL);
         const mask = buildActionMask(cards, currentBoard, 'pineapple');
         const logits = await runInferenceLogits(obs, mask);
         const rankedActions = rankActionsByLogit(logits, mask);

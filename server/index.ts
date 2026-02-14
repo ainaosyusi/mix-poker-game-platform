@@ -660,6 +660,11 @@ function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: O
       ? [ofc.players[nextIdx].board, ofc.players[prevIdx].board]
       : [ofc.players[nextIdx].board];
 
+    // 相手のFL状態（学習環境と一致: FL中の相手のボードは隠蔽）
+    const opponentFL = N >= 3
+      ? [ofc.players[nextIdx].isFantasyland, ofc.players[prevIdx].isFantasyland]
+      : [ofc.players[nextIdx].isFantasyland];
+
     // ボタンからの相対位置
     const playerPosition = ((playerIdx - ofc.buttonIndex) % N + N) % N;
 
@@ -673,13 +678,13 @@ function scheduleCurrentTurnBot(roomId: string, room: any, io: Server, engine: O
         const { placements, discard } = botPlaceFantasyland(cp.fantasyCandidateCards);
         events = engine.placeInitialCards(currentRoom, cp.socketId, placements, discard);
       } else {
-        const placements = await botPlaceInitial(cp.currentCards, opponentBoards, playerPosition);
+        const placements = await botPlaceInitial(cp.currentCards, opponentBoards, playerPosition, opponentFL);
         events = engine.placeInitialCards(currentRoom, cp.socketId, placements);
       }
     } else if (ofc.phase === 'OFC_PINEAPPLE_PLACING') {
       // Pineappleラウンド: 3枚→2枚配置+1捨て
       const { placements, discard } = await botPlacePineapple(
-        cp.currentCards, cp.board, opponentBoards, ofc.round, playerPosition, discards
+        cp.currentCards, cp.board, opponentBoards, ofc.round, playerPosition, discards, opponentFL
       );
       events = engine.placePineappleCards(currentRoom, cp.socketId, placements, discard);
       // 捨て札を記録
