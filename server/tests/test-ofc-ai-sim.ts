@@ -71,9 +71,10 @@ async function simulateOneGame(numPlayers: number): Promise<GameResult[]> {
         const cards = deck.slice(deckIdx, deckIdx + 5);
         deckIdx += 5;
 
-        const opponentBoards = players
-            .filter((_, idx) => idx !== i)
-            .map(p => p.board);
+        const nextIdx = (i + 1) % numPlayers;
+        const prevIdx = (i - 1 + numPlayers) % numPlayers;
+        const opponentBoards = [players[nextIdx].board];
+        if (numPlayers >= 3) opponentBoards.push(players[prevIdx].board);
         const opponentFL = opponentBoards.map(() => false);
 
         const placements = await botPlaceInitial(cards, opponentBoards, i, opponentFL);
@@ -88,9 +89,10 @@ async function simulateOneGame(numPlayers: number): Promise<GameResult[]> {
             const cards = deck.slice(deckIdx, deckIdx + 3);
             deckIdx += 3;
 
-            const opponentBoards = players
-                .filter((_, idx) => idx !== i)
-                .map(p => p.board);
+            const nextIdx = (i + 1) % numPlayers;
+            const prevIdx = (i - 1 + numPlayers) % numPlayers;
+            const opponentBoards = [players[nextIdx].board];
+            if (numPlayers >= 3) opponentBoards.push(players[prevIdx].board);
             const opponentFL = opponentBoards.map(() => false);
 
             const result = await botPlacePineapple(
