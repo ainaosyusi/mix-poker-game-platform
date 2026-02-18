@@ -1,6 +1,6 @@
 // ========================================
 // OFC Bot - AI推論対応版
-// Phase 9 FL Mastery モデル (ONNX) を使用
+// Phase 10 FL Stay モデル (ONNX) を使用
 // フォールバック: ヒューリスティック配置
 // ========================================
 
@@ -18,8 +18,8 @@ const __dirname = path.dirname(__filename);
 // バージョン情報
 // ========================================
 
-export const OFC_BOT_VERSION = '1.5.0';
-export const OFC_MODEL_VERSION = 'Phase 10 FL Stay (18M steps, logits)';
+export const OFC_BOT_VERSION = '2.0.0';
+export const OFC_MODEL_VERSION = 'Phase 10 FL Stay (150M steps, logits)';
 
 // ファウル防止: 探索するアクション数の上限（深くなりすぎるとモデルの選好から離れすぎる）
 const MAX_FOUL_PREVENTION_DEPTH = 10;
